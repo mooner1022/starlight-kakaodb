@@ -1,0 +1,23 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The setup tool adds android:sharedUserId (KakaoTalk's) when it patches this APK. -->
+    <queries>
+        <package android:name="com.kakao.talk" />
+        <package android:name="dev.mooner.starlight" />
+    </queries>
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.KakaoDbHelper"
+        android:supportsRtl="true"
+        android:allowBackup="false">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Exported for StarLight: the service itself checks that the caller is StarLight's UID. -->
+        <service android:name=".SharedService" android:exported="true" />
+    </application>
+</manifest>

@@ -1,0 +1,311 @@
+package party.qwer.hayulgui.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import party.qwer.hayulgui.AppColors
+
+/** 화면 블록 공용 스페이스/반경. */
+val ScreenPadding = 16.dp
+
+/**
+ * 표준 glass 블록 — 반투명 흰 면 + 은은한 흰색 하이라이트 구분선 + 22dp.
+ * 배경 블롭이 면 아래로 살짝 비치므로 화면 어디에서 같은 형태를 쓴다.
+ */
+@Composable
+fun SurfaceCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    fillHeight: Boolean = false,
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = PaddingValues(16.dp),
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val shape = RoundedCornerShape(AppColors.BlockRadius)
+    val blockModifier = modifier
+        .fillMaxWidth()
+        .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier)
+        .shadow(14.dp, shape, ambientColor = AppColors.BlockShadow, spotColor = AppColors.BlockShadow, clip = false)
+        .clip(shape)
+        .background(AppColors.GlassFill, shape)
+    Box(
+        modifier = if (onClick != null) blockModifier.clickable(onClick = onClick) else blockModifier
+    ) {
+        Column(
+            modifier = if (fillHeight) Modifier.fillMaxSize().padding(contentPadding)
+            else Modifier.padding(contentPadding),
+            verticalArrangement = if (fillHeight) Arrangement.SpaceBetween else Arrangement.Top,
+            content = content
+        )
+    }
+}
+
+/** 절(header) — icon chip + title. 우측 액션(예: 새로고침/View all) 슬롯 가능. */
+@Composable
+fun SectionHeader(
+    icon: ImageVector,
+    title: String,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconChip(icon = icon)
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = AppColors.TextMain,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        trailing?.invoke()
+    }
+}
+
+/** 원형 아이콘 배경 칩 — 절/행 앞에 붙는 통일 아이콘. */
+@Composable
+fun IconChip(
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    tint: Color = AppColors.PrimaryAccent,
+    background: Color = AppColors.PrimaryAccent.copy(alpha = 0.13f)
+) {
+    Box(
+        modifier = modifier
+            .size(34.dp)
+            .background(background, shape = CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+/** 상태 알약 — 초록/빨래 점 + 텍스트. fill 된 폭을 쓰지 않고 필요한 만큼만 차지한다. */
+@Composable
+fun StatusPill(
+    ok: Boolean,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .background(
+                color = (if (ok) AppColors.SuccessVivid else AppColors.ErrorVivid).copy(alpha = 0.15f),
+                shape = RoundedCornerShape(50)
+            )
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .background(
+                    color = if (ok) AppColors.SuccessVivid else AppColors.ErrorVivid,
+                    shape = CircleShape
+                )
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (ok) AppColors.SuccessVivid else AppColors.ErrorVivid
+        )
+    }
+}
+
+/** 하나의 stat 타일 값. onClick 이 있으면 타일을 탭 가능한 편집 셀로 만든다. */
+data class StatItem(
+    val label: String,
+    val value: String,
+    val icon: ImageVector? = null,
+    val valueColor: Color = AppColors.TextMain,
+    val onClick: (() -> Unit)? = null
+)
+
+/**
+ * 값쌍을 가로폭에 맞춰 타일로 나열. 행을 좌/우 양 끝으로 벌리는(SpaceBetween) 방식의
+ * "한 카드 = 한 행" 레이아웃을 대체한다. span=2 로 타일 하나가 행 전체를 쓸 수 있다.
+ */
+@Composable
+fun StatTiles(
+    vararg items: StatItem,
+    columns: Int = 2,
+    modifier: Modifier = Modifier,
+    fillHeight: Boolean = false,
+    /** true: 아이콘/값/라벨을 한 행에 담는 컴팩트 타일. 세로 여백이 적은 화면용. */
+    compact: Boolean = false,
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = PaddingValues(0.dp)
+) = StatTiles(items.toList(), columns, modifier, fillHeight, compact, contentPadding)
+
+@Composable
+fun StatTiles(
+    items: List<StatItem>,
+    columns: Int = 2,
+    modifier: Modifier = Modifier,
+    fillHeight: Boolean = false,
+    compact: Boolean = false,
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = PaddingValues(0.dp)
+) {
+    val shape = RoundedCornerShape(AppColors.TileRadius)
+    val tileFill = if (items.any { it.onClick != null }) AppColors.ConfigTile else AppColors.GlassFillStrong
+    Column(
+        modifier.fillMaxWidth().then(if (fillHeight) Modifier.fillMaxSize() else Modifier)
+            .padding(contentPadding),
+        // 채워 쓰는 카드에서는 남은 세로 여유를 행 '위/아래'로만 쓰고, 행 자체는 콘텐츠
+        // 높이 그대로 둔다. 행에 weight 를 주면 콘텐츠가 세로로 잘려 아이콘만 남는다.
+        verticalArrangement = if (fillHeight) Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
+        else Arrangement.spacedBy(10.dp)
+    ) {
+        items.toList().chunked(columns).forEach { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                rowItems.forEach { item ->
+                    var cellModifier = Modifier.weight(1f).height(IntrinsicSize.Min)
+                    // clip 은 clickable 앞에 와야 ripple/press 하이라이트가 모서리 둥근 사각형에
+                    // 맞춰 그려진다. (clickable 뒤 background(shape) 는 그리기만 둥글게 하고 하이라이트 clip 은 각진 채로 남는다)
+                    if (item.onClick != null) cellModifier = cellModifier.clip(shape).clickable(onClick = item.onClick)
+                    // 타일 구성 — compact: 좌측 아이콘 칩 + 우측(위 값 / 아래 라벨) 행.
+                    // compact 아님: 위 칩 / 한복판 값 / 아래 라벨.
+                    if (compact) {
+                        Row(
+                            modifier = cellModifier.background(tileFill, shape = shape)
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (item.icon != null) {
+                                IconChip(icon = item.icon, modifier = Modifier.size(28.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    item.value,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        letterSpacing = 0.3.sp
+                                    ),
+                                    fontWeight = FontWeight.Bold,
+                                    color = item.valueColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    item.label,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        letterSpacing = 0.6.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = AppColors.TextSub,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    } else {
+                        Column(
+                            modifier = cellModifier.background(tileFill, shape = shape)
+                                .padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (item.icon != null) {
+                                IconChip(
+                                    icon = item.icon,
+                                    modifier = Modifier.size(30.dp)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            Box(
+                                modifier = Modifier.fillMaxWidth()
+                                    .then(if (fillHeight) Modifier.weight(1f) else Modifier),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    item.value,
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        letterSpacing = 0.4.sp
+                                    ),
+                                    fontWeight = FontWeight.Bold,
+                                    color = item.valueColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Text(
+                                item.label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    letterSpacing = 0.6.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = AppColors.TextSub,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                // 마지막 행이 columns 로 안 맞으면 빈 셀로 폭 정렬 유지
+                repeat(columns - rowItems.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * SectionTitle — 블록 위에 얹는 절 제목. SectionHeader 와 동일 구성(34dp 원형 아이콘
+ * 칩 + 10dp 여백 + titleMedium 제목)을 쓰므로 배경에 얹히든 블록 안에 쓰든 똑같은
+ * 절 표기가 된다. count 가 있으면 "(n)" 접미.
+ */
+@Composable
+fun SectionTitle(
+    title: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    count: Int? = null,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    SectionHeader(
+        icon = icon,
+        title = if (count != null) "$title ($count)" else title,
+        modifier = modifier,
+        trailing = trailing
+    )
+}
+
+/** epoch millis → "26-09-27 18:30" (korea locale-friendly, no android import to keep pure) */
+fun fmtDate(ms: Long): String =
+    if (ms <= 0L) "—" else java.text.SimpleDateFormat("yy-MM-dd HH:mm", java.util.Locale.KOREA)
+        .format(java.util.Date(ms))

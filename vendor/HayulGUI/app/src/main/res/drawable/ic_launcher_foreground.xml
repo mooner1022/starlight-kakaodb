@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!--HayulGUI = 두 앱이 같은 uid를 공유한다는 의미로, 겹친 원 두 개 + 잠금/교차 형상 -->
+    <group android:translateX="14" android:translateY="14">
+        <path android:pathData="M33,22 A21,21 0 1 0 33,64"
+            android:strokeColor="#6E8BFF" android:strokeWidth="8"
+            android:fillColor="#00000000" android:strokeLineCap="round"/>
+        <path android:pathData="M47,22 A21,21 0 1 1 47,64"
+            android:strokeColor="#5EC9A8" android:strokeWidth="8"
+            android:fillColor="#00000000" android:strokeLineCap="round"/>
+    </group>
+</vector>

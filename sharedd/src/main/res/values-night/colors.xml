@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="kdb_background">#111316</color>
+    <color name="kdb_surface">#1B1E23</color>
+    <color name="kdb_outline">#2B2F36</color>
+    <color name="kdb_text">#E6E8EB</color>
+    <color name="kdb_text_secondary">#9BA1A9</color>
+    <color name="kdb_accent">#91A7FF</color>
+    <color name="kdb_accent_container">#252E4A</color>
+    <color name="kdb_ok">#4CC38A</color>
+    <color name="kdb_info">#9BA1A9</color>
+    <color name="kdb_warn">#E9B949</color>
+    <color name="kdb_error">#F28B82</color>
+</resources>

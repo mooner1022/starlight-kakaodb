@@ -1,0 +1,24 @@
+# build
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx/
+
+# signing / secrets (key lives in app data, never in repo)
+*.p12
+*.keystore
+*.jks
+
+# reference clones & test fixtures (third-party binaries, not ours to distribute)
+ref_project/
+
+# logs / scratch
+*.log
+
+keystore/
+keystore.properties

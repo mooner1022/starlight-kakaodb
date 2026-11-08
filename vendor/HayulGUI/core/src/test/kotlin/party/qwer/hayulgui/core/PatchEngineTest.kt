@@ -1,0 +1,144 @@
+package party.qwer.hayulgui.core
+
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.RandomAccessFile
+import java.security.MessageDigest
+
+class PatchEngineTest {
+
+    @JvmField @Rule val tmp = TemporaryFolder()
+
+    private fun buildMiniApk(name: String, versionCode: Int, dexCount: Int): java.io.File {
+        val apk = tmp.newFile(name)
+        Zip.Builder(apk).use2Test { b ->
+            b.putDeflated("AndroidManifest.xml",
+                AxmlTestBuilder.miniManifest("com.example.app", versionCode))
+            repeat(dexCount) { i ->
+                b.putDeflated(if (i == 0) "classes.dex" else "classes${i + 1}.dex",
+                    ByteArray(2048) { ('A' + it).toByte() })
+            }
+            b.putDeflated("resources.arsc", ByteArray(1024))
+            b.putDeflated("lib/arm64-v8a/native.so", ByteArray(64 * 1024), Zip.METHOD_STORE)
+        }
+        return apk
+    }
+
+    private fun Zip.Builder.use2Test(block: (Zip.Builder) -> Unit) {
+        try { block(this) } finally { finish() }
+    }
+
+    @Test fun fullPatchLoop() {
+        val key = makeKey()
+        val base = buildMiniApk("base.apk", 10, 2)
+        val stubDex = "DUMMY_DEX".toByteArray()
+        val outDir = tmp.newFolder("out")
+
+        val r = PatchEngine.patch(
+            PatchEngine.Request(
+                packageName = "com.example.app",
+                baseApk = base,
+                splits = emptyList(),
+                sharedUserId = "party.qwer.test",
+                originalCertDer = key.cert.encoded,
+                stubDex = stubDex,
+                outDir = outDir,
+                key = key,
+            ),
+            log = { println(it) },
+        )
+
+        val patched = r.outputs.first()
+        val entries = Zip.readEntries(patched)
+        // stub dex는 classes3.dex (원본 2 dex + 1)
+        assertNotNull(entries["classes3.dex"])
+        // marker 파일 + 내용
+        val cfg = PatchEngine.readMarker(patched)!!
+        assertEquals("party.qwer.test", cfg.getProperty("sharedUserId"))
+        assertEquals(key.cert.encoded.joinToString("") { "%02x".format(it) }, cfg.getProperty("sig"))
+
+        // manifest 상태 확인
+        val manifest = PatchEngine.readEntryBytes(patched, "AndroidManifest.xml")!!
+        val axml = Axml.parse(manifest)
+        assertEquals("party.qwer.test", axml.readAttribute("manifest", "sharedUserId"))
+        assertEquals(PatchEngine.STUB_FACTORY_CLASS,
+            axml.readAttribute("application", "appComponentFactory"))
+
+        // 플랫폼(Java XmlBlock)은 문자열 속성 값을 rawValue 로만 읽는다
+        // (nativeGetAttributeStringValue → coerceToString 은 TYPE_STRING 에서 null).
+        // 따라서 추가/교체한 문자열 속성의 rawValue 는 반드시 value pool ref 여야 한다.
+        // 참고: readAttribute 는 typedValue 폴백 때문에 raw=-1 이어도 통과하므로 이 검사 필요.
+        // resmap: sharedUserId id must be present (libandroidfw id-lookup semantics)
+        val ids = axml.resourceMapIds()
+        assertNotNull("resmap should exist", ids)
+        assertTrue("resmap must contain sharedUserId id 0x0101000b",
+            ids!!.contains(0x0101000b))
+        for (pair in listOf("manifest" to "sharedUserId",
+                "application" to "appComponentFactory")) {
+            val v = axml.attributeView(pair.first, pair.second)!!
+            assertEquals("${pair.first}/${pair.second}: dataType must be TYPE_STRING",
+                3, v.dataType)
+            assertTrue("${pair.first}/${pair.second}: rawValue must be a pool ref (not -1)",
+                v.rawRef >= 0)
+            assertEquals("${pair.first}/${pair.second}: rawValue and typedValue.data must be the same pool ref",
+                v.data, v.rawRef)
+        }
+
+        // 서명: apk 서명 cert == our cert
+        val check = ApkSigning.verify(patched, 21)
+        assertTrue2(check.ok, check.issues.joinToString())
+        assertArrayEquals(key.cert.encoded, check.certDer)
+
+        // uncompressed so 정렬 확인
+        val so = entries["lib/arm64-v8a/native.so"]!!
+        assertEquals(0L, so.dataOffset % 4L)
+    }
+
+    @Test fun rePatchScenario() {
+        val key = makeKey()
+        val base = buildMiniApk("base3.apk", 7, 1)
+        val stub = ByteArray(999) { 2 }
+
+        val out1 = tmp.newFolder("r1")
+        val r1 = PatchEngine.patch(reqOf(base, out1, key, "group.one", stub))
+        val patched1 = r1.outputs.first()
+        assertEquals(true, r1.rePatch == false)
+
+        val out2 = tmp.newFolder("r2")
+        val r2 = PatchEngine.patch(reqOf(patched1, out2, key, "group.two", stub))
+        assertEquals(true, r2.rePatch)
+        val entries2 = Zip.readEntries(r2.outputs.first())
+        // classes2.dex 로 추가된 stub 만 존재 (원본 classes.dex + stub)
+        assertNotNull(entries2["classes.dex"])
+        assertNotNull(entries2["classes2.dex"])
+        val cfg = PatchEngine.readMarker(r2.outputs.first())!!
+        // 재패치인데 첫 patch 의 sig(marker 에 저장) 가 유지 — 단, 재패치 입력은 이미 hayulgui.cfg 를
+        // 들고 있으므로 거기 저장된 sig(첫 키 cert hex)가 preserved
+        assertEquals(key.cert.encoded.joinToString("") { "%02x".format(it) }, cfg.getProperty("sig"))
+        assertEquals("group.two", cfg.getProperty("sharedUserId"))
+
+        val axml = Axml.parse(PatchEngine.readEntryBytes(r2.outputs.first(), "AndroidManifest.xml")!!)
+        assertEquals("group.two", axml.readAttribute("manifest", "sharedUserId"))
+    }
+
+    private fun reqOf(base: java.io.File, out: java.io.File, key: SigningKey.KeySet,
+                      group: String, stub: ByteArray) = PatchEngine.Request(
+        packageName = "com.example.app", baseApk = base, splits = emptyList(),
+        sharedUserId = group, originalCertDer = key.cert.encoded,
+        stubDex = stub, outDir = out, key = key,
+    )
+
+    private fun assertTrue2(cond: Boolean, msg: String = "") {
+        org.junit.Assert.assertTrue("$msg", cond)
+    }
+
+    companion object {
+        fun makeKey(): SigningKey.KeySet =
+            SigningKey.loadOrCreate(java.nio.file.Files.createTempDirectory("hayulkey").toFile()) {}
+    }
+}

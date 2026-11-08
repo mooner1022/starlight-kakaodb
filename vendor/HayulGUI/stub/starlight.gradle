@@ -1,0 +1,30 @@
+plugins { id 'com.android.library' }
+
+android {
+    namespace 'party.qwer.hayulgui.stub'
+    compileSdk 35
+    defaultConfig { minSdk 26 }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+def classesDir = layout.buildDirectory.dir('intermediates/stub-classes')
+def assetsDir = layout.buildDirectory.dir('stub-assets')
+def extractStub = tasks.register('extractStubClasses', Copy) {
+    dependsOn('bundleReleaseAar')
+    from(zipTree(layout.buildDirectory.file('outputs/aar/hayulstub-release.aar'))) { include 'classes.jar' }
+    into(classesDir)
+}
+tasks.register('stubDex', JavaExec) {
+    dependsOn(extractStub)
+    def sdk = android.sdkDirectory
+    classpath = files(new File(sdk, 'build-tools/35.0.0/lib/d8.jar'))
+    mainClass = 'com.android.tools.r8.D8'
+    def output = assetsDir.get().asFile
+    doFirst { output.mkdirs() }
+    args '--min-api', '26', '--release', '--lib', new File(sdk, 'platforms/android-35/android.jar').absolutePath,
+        '--output', output.absolutePath, classesDir.get().file('classes.jar').asFile.absolutePath
+    doLast {
+        java.nio.file.Files.move(new File(output, 'classes.dex').toPath(), new File(output, 'stub.dex').toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+}

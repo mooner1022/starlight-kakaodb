@@ -1,0 +1,55 @@
+// The root helper (RootDaemon). It is never installed: RootAccess copies this APK out of the plugin's assets with su
+// and runs it under app_process, as uid 0. So it is an application module only to have AGP resolve the AARs it needs
+// (SQLCipher for crypto_user_database), dex them with their dependencies and package their native libraries;
+// RootDaemon extracts libsqlcipher.so out of its own APK at run time.
+//
+// :app ships the release APK as the asset rootd.apk (see rootdApk in app/build.gradle). Protocol is in
+// src/protocol/java, which :app compiles too.
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'dev.mooner.kakaodb.rootd'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'dev.mooner.kakaodb.rootd'
+        minSdk 26
+        targetSdk 33
+        versionCode 1
+        versionName '1.0'
+
+        // app_process runs as the device's primary ABI (64-bit on a 64-bit device). Each ABI adds about 4-5 MB of
+        // libsqlcipher.so to the plugin: add 'armeabi-v7a' for 32-bit only devices.
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    sourceSets {
+        main {
+            java.srcDir 'src/protocol/java'
+        }
+    }
+    lint {
+        // Nothing here ever runs as an installed app.
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    // Same versions as Iris, where they were checked against a device. KakaoTalk opens crypto_user_database with
+    // SQLCipher 4 defaults: a much older or newer SQLCipher may not read it.
+    implementation 'net.zetetic:sqlcipher-android:4.13.0'
+    implementation 'androidx.sqlite:sqlite:2.7.0'
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A database: a cap and three bands, cut apart so the monochrome (themed) icon keeps them. Inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,34.5 a18,6 0 1,1 36,0 a18,6 0 1,1 -36,0 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,37.5 a18,6 0 0,0 36,0 V47.5 a18,6 0 0,1 -36,0 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,50.5 a18,6 0 0,0 36,0 V60.5 a18,6 0 0,1 -36,0 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,63.5 a18,6 0 0,0 36,0 V73.5 a18,6 0 0,1 -36,0 Z" />
+</vector>

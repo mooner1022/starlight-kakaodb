@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <queries><package android:name="com.kakao.talk" /><package android:name="dev.mooner.kakaodb.sharedd" /></queries>
+    <application android:label="KakaoDB 설정 도구" android:allowBackup="false">
+        <!-- Not recreated on rotation: patching runs on a thread that reports back to this instance. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

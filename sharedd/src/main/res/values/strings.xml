@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KakaoDB Helper</string>
+    <string name="tagline">Serves KakaoTalk\'s database to StarLight</string>
+
+    <string name="summary_error">Setup needed</string>
+    <string name="summary_error_detail">Fix the items marked below, then connect again from StarLight.</string>
+    <string name="summary_warn">Almost ready</string>
+    <string name="summary_warn_detail">Check the warnings below.</string>
+    <string name="summary_ready">Ready</string>
+    <string name="summary_ready_detail">In StarLight\'s plugin list, open Setup for KakaoTalk DB, choose the shared UID access mode and press Done.</string>
+    <string name="summary_connected">Connected to StarLight</string>
+    <string name="summary_connected_detail">KakaoTalk\'s database is being served to StarLight.</string>
+
+    <string name="section_setup">CHECKS</string>
+    <string name="section_connection">STARLIGHT</string>
+
+    <string name="check_patch">Shared UID patch</string>
+    <string name="check_patch_missing">This helper isn\'t patched. Install the helper patched in Setup for KakaoTalk DB, in StarLight\'s plugin list.</string>
+    <string name="check_kakao">KakaoTalk</string>
+    <string name="check_kakao_missing">KakaoTalk isn\'t installed.</string>
+    <string name="check_kakao_ok">Version %1$s · shares UID %2$d</string>
+    <string name="check_kakao_uid_differs">KakaoTalk runs as UID %1$d, this helper as %2$d. Install KakaoTalk and the helper patched with the same key.</string>
+    <string name="check_starlight">StarLight</string>
+    <string name="check_starlight_missing">StarLight isn\'t installed.</string>
+    <string name="check_version">Version %1$s</string>
+    <string name="check_databases">Databases</string>
+    <string name="check_databases_no_dir">The database folder isn\'t there yet. Open KakaoTalk and sign in.</string>
+    <string name="check_databases_missing">%1$s is missing. Open KakaoTalk and sign in.</string>
+    <string name="check_databases_unsafe">%1$s has no %2$s. Open KakaoTalk once.</string>
+    <string name="check_friends">Friend list</string>
+    <string name="check_friends_ok">crypto_user_database · SQLCipher ready</string>
+    <string name="check_friends_absent">No crypto_user_database: older KakaoTalk versions keep friends in KakaoTalk2.db.</string>
+    <string name="check_friends_no_sqlcipher">SQLCipher didn\'t load, so friends show as unknown users: %1$s</string>
+    <string name="check_connection">Connection</string>
+    <string name="check_connection_active">%1$d active sessions · last connected %2$s</string>
+    <string name="check_connection_idle">Not connected · last connected %1$s</string>
+    <string name="check_connection_never">Not connected yet. Connect from the KakaoTalk DB plugin in StarLight.</string>
+    <string name="check_refused">Refused a connection</string>
+    <string name="check_refused_detail">%1$s (%2$s)</string>
+
+    <string name="open_kakao">Open KakaoTalk</string>
+    <string name="open_starlight">Open StarLight</string>
+    <string name="note">The helper runs in the background when StarLight connects: this screen only shows its status. If StarLight says the helper is out of date, patch and install it again in Setup for KakaoTalk DB, in StarLight\'s plugin list.</string>
+    <string name="footer">build %1$s · protocol %2$d · v%3$s</string>
+
+    <string name="symbol_ok" translatable="false">✓</string>
+    <string name="symbol_info" translatable="false">i</string>
+    <string name="symbol_warn" translatable="false">!</string>
+    <string name="symbol_error" translatable="false">✕</string>
+    <string name="state_ok">OK</string>
+    <string name="state_info">Info</string>
+    <string name="state_warn">Warning</string>
+    <string name="state_error">Error</string>
+</resources>
