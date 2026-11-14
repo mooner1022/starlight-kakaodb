@@ -470,7 +470,7 @@ class DatabaseDecoderTest {
         }
     }
 
-    /** In root mode every query is a round trip to the helper: the frequent checks must take few. */
+    /** In root and shared UID modes every query is a round trip to the helper: the frequent checks must take few. */
     @Test
     fun `checks take few queries`() = runBlocking {
         val factory = TestFactory()
@@ -484,23 +484,157 @@ class DatabaseDecoderTest {
             delay(100)
 
             // Nothing committed (another file changed, a poll tick, the settle check): one query.
-            factory.statements.clear()
-            triggers.emit(Unit)
-            delay(100)
-            assertEquals(listOf("PRAGMA main.data_version"), factory.statements.toList())
+            assertEquals(listOf("PRAGMA main.data_version"), factory.statementsOf { triggers.emit(Unit) })
 
-            // A new message from someone known: the data versions, then the rows.
-            factory.statements.clear()
-            insertChat(groupId, aliceId, "새 메시지")
-            triggers.emit(Unit)
-            awaitEvents<KakaoEvent.MessageCreated>(1)
-            delay(50)
-            val statements = factory.statements.toList()
-            assertEquals(3, statements.size, statements.toString())
-            assertEquals(listOf("PRAGMA main.data_version", "PRAGMA db2.data_version"), statements.take(2))
+            // A commit that added no message, as read marks are: the data version and the (no) rows. The look for a
+            // reset table isn't due again so soon after the one the first check made.
+            val noMessage = factory.statementsOf {
+                main.exec("UPDATE chat_rooms SET unread_count = 1 WHERE id = $groupId")
+                triggers.emit(Unit)
+            }
+            assertEquals(2, noMessage.size, noMessage.toString())
+            assertEquals("PRAGMA main.data_version", noMessage[0])
+            assertTrue("FROM main.chat_logs WHERE _id > ?" in noMessage[1], noMessage.toString())
+
+            // A new message from someone known: the rows, then db2's data version for the cache they are read with.
+            val message = factory.statementsOf {
+                insertChat(groupId, aliceId, "새 메시지")
+                triggers.emit(Unit)
+                awaitEvents<KakaoEvent.MessageCreated>(1)
+            }
+            assertEquals(3, message.size, message.toString())
+            assertEquals("PRAGMA main.data_version", message[0])
+            assertEquals("PRAGMA db2.data_version", message[2])
         } finally {
             counted.close()
         }
+    }
+
+    @Test
+    fun `a reset chat_logs is noticed and read from its start`() = runBlocking {
+        val prompt = DatabaseDecoder(
+            DecoderOptions(dir.absolutePath, selfName = "나", resetCheckIntervalMillis = 0), JdbcSqliteSession.factory,
+        )
+        try {
+            prompt.open()
+            prompt.start(scope, triggers) { events.send(it) }
+            insertChat(groupId, aliceId, "전")
+            insertChat(groupId, aliceId, "전 2")
+            triggers.emit(Unit)
+            awaitEvents<KakaoEvent.MessageCreated>(2)
+
+            // The table starts over below what was read.
+            main.exec("DELETE FROM chat_logs")
+            main.exec("DELETE FROM sqlite_sequence WHERE name = 'chat_logs'")
+            triggers.emit(Unit)
+            delay(200)
+
+            insertChat(groupId, aliceId, "후")
+            triggers.emit(Unit)
+            assertEquals("후", awaitEvents<KakaoEvent.MessageCreated>(1).single().chat.message)
+        } finally {
+            prompt.close()
+        }
+    }
+
+    /**
+     * Newer KakaoTalk versions keep the friends in crypto_user_database: a commit to KakaoTalk2.db says nothing about
+     * them, nor about the rooms named after them, so neither is read again.
+     */
+    @Test
+    fun `a commit to db2 only drops what was read from it`() = runBlocking {
+        val userDb = moveFriendsToUserDb()
+        val factory = TestFactory()
+        val counted = DatabaseDecoder(DecoderOptions(dir.absolutePath, selfName = "나"), factory)
+        try {
+            counted.open()
+            counted.start(scope, triggers) { events.send(it) }
+            insertChat(groupId, aliceId, "방과 친구를 캐시에")
+            insertChat(openId, bobId, "오픈방도")
+            triggers.emit(Unit)
+            awaitEvents<KakaoEvent.MessageCreated>(2)
+            delay(100)
+
+            // The group chat and its sender are still cached: only the rows and the three data versions.
+            val group = factory.statementsOf {
+                sub.exec("UPDATE open_link SET name = '새 이름' WHERE id = $linkId")
+                insertChat(groupId, aliceId, "그대로")
+                triggers.emit(Unit)
+                val created = awaitEvents<KakaoEvent.MessageCreated>(1).single()
+                assertEquals("Alice", created.chat.user?.name)
+                assertEquals("Alice 외 1명", created.room.name)
+            }
+            assertEquals(4, group.size, group.toString())
+            assertEquals(1, group.count { it.startsWith("SELECT") }, group.toString())
+
+            // The open chat was built from db2: it is read again, with its link's new name. Its room, link and member,
+            // that is; that its sender is no friend is still known.
+            val open = factory.statementsOf {
+                insertChat(openId, bobId, "다시 읽기")
+                triggers.emit(Unit)
+                val created = awaitEvents<KakaoEvent.MessageCreated>(1).single()
+                assertEquals("새 이름", created.room.name)
+                assertEquals("Bob", created.chat.user?.name)
+            }
+            assertEquals(7, open.size, open.toString())
+            assertTrue(open.none { "FROM main.user" in it || "talk_channel" in it }, open.toString())
+
+            // And the friends still follow their own database.
+            userDb.exec("UPDATE user SET nickname = 'Alice2' WHERE id = $aliceId")
+            insertChat(groupId, aliceId, "이름 바뀜")
+            triggers.emit(Unit)
+            val renamed = awaitEvents<KakaoEvent.MessageCreated>(1).single()
+            assertEquals("Alice2", renamed.chat.user?.name)
+            assertEquals("Alice2 외 1명", renamed.room.name)
+        } finally {
+            counted.close()
+            userDb.close()
+        }
+    }
+
+    @Test
+    fun `a room named by its members outlives changes to friends and db2`() = runBlocking {
+        main.exec("""UPDATE chat_rooms SET meta = '[{"type":3,"content":"모임방"}]' WHERE id = $groupId""")
+        val factory = TestFactory()
+        val counted = DatabaseDecoder(DecoderOptions(dir.absolutePath, selfName = "나"), factory)
+        try {
+            counted.open()
+            counted.start(scope, triggers) { events.send(it) }
+            insertChat(groupId, aliceId, "캐시에")
+            triggers.emit(Unit)
+            assertEquals("모임방", awaitEvents<KakaoEvent.MessageCreated>(1).single().room.name)
+            delay(100)
+
+            // Friends are in db2 here, so they are read again; the room, which has no name of theirs, isn't.
+            val statements = factory.statementsOf {
+                sub.exec("UPDATE friends SET name = '${e(selfId, "Alice2")}' WHERE id = $aliceId")
+                insertChat(groupId, aliceId, "이름 바뀜")
+                triggers.emit(Unit)
+                val created = awaitEvents<KakaoEvent.MessageCreated>(1).single()
+                assertEquals("Alice2", created.chat.user?.name)
+                assertEquals("모임방", created.room.name)
+            }
+            assertTrue(statements.none { "FROM main.chat_rooms" in it }, statements.toString())
+        } finally {
+            counted.close()
+        }
+    }
+
+    @Test
+    fun `rooms asked for are read as they are now`() = runBlocking {
+        start()
+        insertChat(groupId, aliceId, "방을 캐시에")
+        triggers.emit(Unit)
+        awaitEvents<KakaoEvent.MessageCreated>(1)
+
+        main.exec("UPDATE chat_rooms SET unread_count = 7 WHERE id = $groupId")
+        assertEquals(7, decoder.getRoom(groupId, fresh = true)?.unreadCount)
+        // Which also brings the cache up to date.
+        assertEquals(7, decoder.getRoom(groupId)?.unreadCount)
+
+        main.exec("UPDATE chat_rooms SET unread_count = 8 WHERE id = $groupId")
+        assertEquals(8, decoder.getRooms().first { it.id == groupId }.unreadCount)
+        assertEquals(8, decoder.getRoom(groupId)?.unreadCount)
     }
 
     /** The root helper refuses other statements (ServedSql): every one the decoder makes must pass, or root mode breaks. */
@@ -654,6 +788,15 @@ class DatabaseDecoderTest {
         @Volatile var failNext: ((String) -> Boolean)? = null
 
         val statements: MutableList<String> = Collections.synchronizedList(arrayListOf())
+
+        /** The statements [block] causes, until the decoder has settled after it. */
+        suspend fun statementsOf(block: suspend () -> Unit): List<String> {
+            delay(100)
+            statements.clear()
+            block()
+            delay(150)
+            return statements.toList()
+        }
 
         override fun open(mainPath: String, subPath: String): ISqliteSession {
             if (failOpens)

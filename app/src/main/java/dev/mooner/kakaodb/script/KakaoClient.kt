@@ -49,7 +49,8 @@ class KakaoClient internal constructor() {
      * @throws IllegalArgumentException [roomId] isn't a number.
      */
     fun getRoom(roomId: String): KakaoRoom? =
-        query { getRoom(roomId.toId())?.let(mapper::room) }
+        // Read now: the decoder's cached room may hold counts from minutes ago.
+        query { getRoom(roomId.toId(), fresh = true)?.let(mapper::room) }
 
     /**
      * Every chat room the user is in, most recently active first.

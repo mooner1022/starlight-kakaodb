@@ -8,15 +8,18 @@ import dev.mooner.kakaodb.core.model.RoomData
 /**
  * Cache of friends, open chat members, open links and rooms.
  *
- * Invalidation:
- *  - when `data_version` of db2 (KakaoTalk2.db) changes, [invalidateDb2] drops everything from db2, and the rooms,
- *    whose names depend on db2;
+ * Invalidation drops what was read from the database that changed, and the rooms built from it:
+ *  - when `data_version` of db2 (KakaoTalk2.db) changes, [invalidateDb2] drops the open chat members and links, and
+ *    the rooms that have a link. The friends go too, with the rooms named after them, when db2 is where they are;
  *  - when the friend list is in crypto_user_database and that changes, [invalidateFriends] drops the friends and the
- *    rooms;
+ *    rooms named after them;
  *  - a FEED message (join, leave, kick...) drops that room and its affected members only, through [invalidateRoom];
  *  - names the user gives rooms (private_meta) change without any signal, so rooms also expire after a TTL.
  *
- * Null results (not in the database) are cached too: a new friend changes db2, which clears everything.
+ * A room that depends on neither (a group chat the user or its members named) outlives both.
+ *
+ * Null results (not in the database) are cached too: a new friend or member changes the database they are read from,
+ * which drops them.
  *
  * Not thread-safe: use it from the decoder's dispatcher only.
  */
@@ -84,8 +87,12 @@ internal class DataCache(
         return entry.room
     }
 
-    fun putRoom(room: RoomData, now: Long = System.currentTimeMillis()) {
-        rooms[room.id] = RoomEntry(room, now)
+    /**
+     * Caches [room]. [usesLink]: an open link was looked up for it (found or not); [usesFriends]: its name was made
+     * of friends' names. They tell which invalidations drop it.
+     */
+    fun putRoom(room: RoomData, usesLink: Boolean, usesFriends: Boolean, now: Long = System.currentTimeMillis()) {
+        rooms[room.id] = RoomEntry(room, now, usesLink, usesFriends)
     }
 
     fun invalidateRoom(id: Long) {
@@ -95,22 +102,32 @@ internal class DataCache(
     /** Drops the friends, and the rooms named after them. */
     fun invalidateFriends() {
         friends.clear()
-        rooms.clear()
         friendList = null
+        rooms.values.removeAll(RoomEntry::usesFriends)
     }
 
-    fun invalidateDb2() {
+    /**
+     * Drops what was read from db2: the open chat members and links, and the rooms that have a link. With
+     * [friendsInDb2], the friends too (see [invalidateFriends]); otherwise they are in crypto_user_database, which a
+     * commit to db2 says nothing about.
+     */
+    fun invalidateDb2(friendsInDb2: Boolean) {
+        openMembers.clear()
+        openLinks.clear()
+        rooms.values.removeAll(RoomEntry::usesLink)
+        if (friendsInDb2)
+            invalidateFriends()
+    }
+
+    fun invalidateAll() {
         friends.clear()
+        friendList = null
         openMembers.clear()
         openLinks.clear()
         rooms.clear()
-        friendList = null
     }
-
-    fun invalidateAll() =
-        invalidateDb2()
 
     private data class MemberKey(val chatId: Long, val userId: Long)
 
-    private class RoomEntry(val room: RoomData, val loadedAt: Long)
+    private class RoomEntry(val room: RoomData, val loadedAt: Long, val usesLink: Boolean, val usesFriends: Boolean)
 }

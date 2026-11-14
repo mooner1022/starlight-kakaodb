@@ -17,6 +17,12 @@ data class DecoderOptions(
      * couple hundred a second; a message committed right after something else may come this much later.
      */
     val minPollSpacingMillis: Long = 5L,
+    /**
+     * How often, at most, a check that found no new rows also looks whether chat_logs was emptied (its highest _id
+     * went back: the database was reset in place). Most commits add no row, and the look is one more query for each;
+     * a reset is rare, and is noticed up to this much later, rows added meanwhile going unreported. 0: every time.
+     */
+    val resetCheckIntervalMillis: Long = 10_000L,
     /** First wait before reopening a connection that broke and couldn't be reopened; doubles on each failure. */
     val reconnectDelayMillis: Long = 2_000L,
     /** Longest wait between attempts to reopen a broken connection. */

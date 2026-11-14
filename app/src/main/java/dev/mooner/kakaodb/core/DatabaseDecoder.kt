@@ -42,6 +42,7 @@ class DatabaseDecoder(
     private var lastSeenPk: Long = 0L
     private var lastMainVersion: Long = -1L
     private var lastDb2Version : Long = -1L
+    private var lastResetCheckAt: Long = 0L
 
     // crypto_user_database, while it holds the friend list (see openUserDatabase). Accessed on the dispatcher only.
     private var mUserSession: ISqliteSession? = null
@@ -193,8 +194,12 @@ class DatabaseDecoder(
 
     fun getSelf(): SelfUserData = selfUser
 
-    suspend fun getRoom(roomId: Long): RoomData? =
-        cachedDb { room(roomId) }
+    /**
+     * A room. With [fresh], its row is read now rather than taken from the cache, which may hold counts and read
+     * marks from minutes ago (see [DecoderOptions.roomCacheTtlMillis]): for callers that asked for the room itself.
+     */
+    suspend fun getRoom(roomId: Long, fresh: Boolean = false): RoomData? =
+        cachedDb { room(roomId, fresh) }
 
     /** Every room, most recently active first. */
     suspend fun getRooms(): List<RoomData> =
@@ -205,7 +210,7 @@ class DatabaseDecoder(
 
     /** A user; with [roomId] of an open chat, that room's open profile comes first. */
     suspend fun getUser(userId: Long, roomId: Long? = null): UserData? =
-        cachedDb { resolveUserOrNull(userId, roomId?.let(::room)) }
+        cachedDb { resolveUserOrNull(userId, roomId?.let { room(it) }) }
 
     suspend fun getMembers(roomId: Long): List<UserData> =
         cachedDb { members(roomId) }
@@ -227,9 +232,10 @@ class DatabaseDecoder(
     // ================================================================ change detection
 
     /**
-     * Reads what was added since the last poll. Every query here is a round trip to the root helper in root mode, so
-     * the common cases take few: nothing committed to KakaoTalk.db is one query, a new message four (data versions,
-     * then the rows).
+     * Reads what was added since the last poll. Every query here is a round trip to the helper in root and shared UID
+     * modes, so the common cases take few: nothing committed to KakaoTalk.db is one query; a commit that added no
+     * message (a read mark, a room's counts: most commits of a busy room) two, the data version and the rows; a new
+     * message from someone known three, with db2's data version (four with crypto_user_database's).
      */
     private fun pollChanges(): List<KakaoEvent> {
         val mainVersion = session.dataVersion("main")
@@ -239,19 +245,24 @@ class DatabaseDecoder(
             lastMainVersion = mainVersion
             return emptyList()
         }
-        // The new rows' senders and rooms come from the cache: drop first what changed in the other databases.
-        refreshCaches()
 
         // Where this poll has read up to. It becomes lastSeenPk (and mainVersion lastMainVersion) only once every row
         // is read and turned into events: when a query fails halfway, the retry after reconnecting (or the next poll)
         // reads them all again. Nothing is emitted before this returns, so nothing comes twice.
         var cursor = lastSeenPk
+        var refreshed = false
         val events: MutableList<KakaoEvent> = arrayListOf()
         val sql = chatLogs.select("_id > ?", "ORDER BY _id LIMIT ?")
         while (true) {
             val rows = session.query(sql, cursor, options.batchSize, mapper = ::readLog)
             if (rows.isEmpty())
                 break
+            // The new rows' senders and rooms come from the cache: drop first what changed in the other databases.
+            // Only now that there are rows: without any, nothing reads the cache, and the next read looks again.
+            if (!refreshed) {
+                refreshCaches()
+                refreshed = true
+            }
             cursor = rows.last().pk
             val chats = rows.mapNotNull(LogRow::chat)
             prefetchFriends(chats.map(ChatData::userId))
@@ -261,7 +272,7 @@ class DatabaseDecoder(
                 break
         }
 
-        if (cursor == lastSeenPk) {
+        if (cursor == lastSeenPk && resetCheckDue()) {
             // Nothing new: KakaoTalk committed something else (rooms, read receipts...), or the table was emptied.
             val maxPk = currentMaxPk()
             if (maxPk < lastSeenPk) {
@@ -276,8 +287,22 @@ class DatabaseDecoder(
     }
 
     /**
-     * Drops cached friends, open chat members, links and rooms when KakaoTalk2.db, or crypto_user_database while it
-     * holds the friend list, was committed to since the last look. Runs before new rows are turned into events, and
+     * Whether to look for a table that was emptied, which a poll that found no rows can't tell from one where nothing
+     * was added. Commits without new rows are the most frequent ones, and the look is one more query for each, so it
+     * runs once in a while ([DecoderOptions.resetCheckIntervalMillis]): a reset is noticed that much later.
+     */
+    private fun resetCheckDue(): Boolean {
+        val now = System.currentTimeMillis()
+        // Due also when the clock went back.
+        if (now - lastResetCheckAt in 0 until options.resetCheckIntervalMillis)
+            return false
+        lastResetCheckAt = now
+        return true
+    }
+
+    /**
+     * Drops what the cache holds of KakaoTalk2.db, or of crypto_user_database while it holds the friend list, when
+     * that was committed to since the last look (see [DataCache]). Runs before new rows are turned into events, and
      * before queries: nothing reads the cache in between, so there is no need to look on every poll.
      */
     private fun refreshCaches() {
@@ -285,7 +310,7 @@ class DatabaseDecoder(
         if (db2Version != lastDb2Version) {
             if (lastDb2Version != -1L) {
                 logger.debug { "KakaoTalk2.db changed ($lastDb2Version -> $db2Version), invalidating cache" }
-                cache.invalidateDb2()
+                cache.invalidateDb2(friendsInDb2 = friends.available)
             }
             lastDb2Version = db2Version
         }
@@ -722,13 +747,18 @@ class DatabaseDecoder(
 
     // ================================================================ rooms
 
-    private fun room(roomId: Long): RoomData? {
-        cache.room(roomId)?.let { return it }
+    /** The room [roomId], from the cache unless [fresh] asks for its row as it is now. */
+    private fun room(roomId: Long, fresh: Boolean = false): RoomData? {
+        if (!fresh)
+            cache.room(roomId)?.let { return it }
         if (!chatRooms.available)
             return null
         val raw = session.queryFirst(chatRooms.select("id = ?", "LIMIT 1"), roomId, mapper = ::RawRoom)
-            ?: return null
-        return buildRoom(raw).also(cache::putRoom)
+        if (raw == null) {
+            cache.invalidateRoom(roomId)
+            return null
+        }
+        return buildRoom(raw)
     }
 
     private fun allRooms(): List<RoomData> {
@@ -737,7 +767,8 @@ class DatabaseDecoder(
         val order = if (chatRooms.has("last_updated_at")) "ORDER BY last_updated_at DESC" else "ORDER BY _id DESC"
         val raws = session.query(chatRooms.select(suffix = order), mapper = ::RawRoom)
         allFriends() // Loads the friends that room names are made of, at once.
-        return raws.map { raw -> cache.room(raw.id) ?: buildRoom(raw).also(cache::putRoom) }
+        // From the rows just read, not the cache: its rooms may hold counts and read marks from minutes ago.
+        return raws.map(::buildRoom)
     }
 
     private fun openLink(linkId: Long): OpenLinkData? {
@@ -752,17 +783,23 @@ class DatabaseDecoder(
         if (!openLinks.available) emptyList()
         else session.query(openLinks.select()) { it.toOpenLink() }.filterNotNull()
 
+    /** The room of [raw], which also goes into the cache, with what it was built from (see [DataCache.putRoom]). */
     private fun buildRoom(raw: RawRoom): RoomData {
         val type = RoomData.Type.of(raw.type)
         val customName = raw.privateMeta.stringField("name")
         val meta = parseRoomMeta(raw.meta)
-        val openLink = raw.linkId?.takeIf { it > 0 }?.let(::openLink)
+        val linkId = raw.linkId?.takeIf { it > 0 }
+        val openLink = linkId?.let(::openLink)
         val isOpen = type == RoomData.Type.OM || type == RoomData.Type.OD
 
-        val name = if (isOpen)
-            openLink?.name ?: customName ?: meta.title
-        else
-            customName ?: meta.title ?: generateRoomName(raw.members)
+        val namedByUser = customName ?: meta.title
+        // Only then are friends looked up for the name.
+        val usesFriends = !isOpen && namedByUser == null
+        val name = when {
+            isOpen      -> openLink?.name ?: namedByUser
+            usesFriends -> generateRoomName(raw.members)
+            else        -> namedByUser
+        }
 
         return RoomData(
             id                 = raw.id,
@@ -786,7 +823,7 @@ class DatabaseDecoder(
             privateMeta        = raw.privateMeta,
             meta               = raw.meta,
             v                  = raw.v,
-        )
+        ).also { cache.putRoom(it, usesLink = linkId != null, usesFriends = usesFriends) }
     }
 
     /** Names the room after the other members, as KakaoTalk does. For a 1:1 chat, the other person's name. */
