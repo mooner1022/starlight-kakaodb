@@ -14,9 +14,10 @@ import java.io.File
  * the same UID. The initial setup holds only what the first installation needs (sharedUidSetupSteps); updating the
  * helper and the key's backup and restore are in the plugin settings (sharedUidMaintenance).
  *
- * Both are shown only while the access mode item [modeId] is [modeKey], in the same category as it, since a rule can
- * only look at items next to it. Sections are info rows, because ConfigDSL's categories don't nest: the rows after a
- * heading are what belongs to it.
+ * The setup's steps are shown only while the access mode item (modeId) is shared UID (modeKey), in the same category
+ * as it, since a visibility rule can only look at items next to it. The settings' items are a category of their own
+ * ("Shared UID helper"), always shown: ConfigDSL's categories don't nest, open no screen of their own, and can't be
+ * hidden by an item of another category.
  *
  * Parameters of both:
  * - dataDir: where the plugin keeps the signing key and the patched APKs.
@@ -102,38 +103,25 @@ internal fun ConfigItemBuilder.sharedUidSetupSteps(
 
 /**
  * The plugin settings' part, for after the first installation: patch and install the helper again when a plugin
- * update changed it, and back up or restore the signing key.
+ * update changed it, and back up or restore the signing key. The items of a category of their own, whose title says
+ * what they are about; each says in a line when it is needed.
  */
 internal fun ConfigItemBuilder.sharedUidMaintenance(
     dataDir: File,
     asset: (String) -> File,
-    modeId: String,
-    modeKey: String,
     tint: Int,
 ) {
     fun embedded(context: Context) = EmbeddedSetup(context, dataDir, asset)
 
-    info {
-        id = "shared_maintenance"
-        title = tr("Shared UID helper", "공유 UID 도우미")
-        description = tr(
-            "Patching and installing KakaoTalk and the helper the first time is in the plugin's initial setup (Setup in the plugin list). When the plugin says the installed helper is out of date, patch the helper again and install it here. Back up the signing key before removing StarLight or the plugin.",
-            "카카오톡과 도우미의 첫 패치·설치는 플러그인의 초기 설정(플러그인 목록의 '초기 설정')에서 해요. 플러그인이 설치된 도우미가 오래됐다고 알려 주면 여기서 도우미만 다시 패치해 설치하세요. StarLight나 플러그인을 지우기 전에는 서명 키를 백업하세요.",
-        )
-        icon = Icon.INFO
-        iconTintColor = tint
-        visibleWhen(modeId, modeKey)
-    }
     button {
         id = "patch_shared_helper"
         title = tr("Patch helper only", "도우미만 다시 패치")
         description = tr(
-            "Patches the bundled helper with the existing signing key; no KakaoTalk APK is needed. Install it with the next item.",
-            "기존 서명 키로 내장 도우미만 다시 패치해요. 카카오톡 APK는 필요 없어요. 다음 항목으로 설치하세요.",
+            "When the status says the installed helper doesn't match, after a plugin update.",
+            "플러그인 업데이트 뒤 설치된 도우미가 맞지 않다고 나올 때 써요.",
         )
         icon = Icon.REFRESH
         iconTintColor = tint
-        visibleWhen(modeId, modeKey)
         action {
             setDescription(tr("Patching the helper.", "도우미를 패치하는 중입니다."))
             try {
@@ -151,22 +139,17 @@ internal fun ConfigItemBuilder.sharedUidMaintenance(
     button {
         id = "install_patched_helper"
         title = tr("Install patched helper", "패치된 도우미 설치")
-        description = tr(
-            "Opens Android's installer. A connected plugin reconnects by itself once it is installed.",
-            "안드로이드 설치 화면이 열려요. 설치하면 연결 중이던 플러그인이 다시 연결해요.",
-        )
+        description = tr("Installs the helper patched above.", "위에서 다시 패치한 도우미를 설치해요.")
         icon = Icon.DOWNLOAD
         iconTintColor = tint
-        visibleWhen(modeId, modeKey)
         action { install(embedded(context), EmbeddedSetup.HELPER_DIR) }
     }
     button {
         id = "export_shared_key"
         title = tr("Back up signing key", "서명 키 백업")
-        description = tr("Back up before removing StarLight or the plugin.", "StarLight나 플러그인을 삭제하기 전에 키를 백업하세요.")
+        description = tr("Back up before removing StarLight or the plugin.", "StarLight나 플러그인을 지우기 전에 백업하세요.")
         icon = Icon.KEY
         iconTintColor = tint
-        visibleWhen(modeId, modeKey)
         action {
             val password = askKeyPassword(context, true) ?: return@action
             try {
@@ -186,12 +169,11 @@ internal fun ConfigItemBuilder.sharedUidMaintenance(
         id = "import_shared_key"
         title = tr("Restore signing key", "서명 키 복원")
         description = tr(
-            "Before the first patch, after StarLight or the plugin was installed again. Takes a PKCS#12 backup, including one from the previous setup app.",
-            "StarLight나 플러그인을 다시 설치했다면 처음 패치하기 전에 복원하세요. 기존 설정 도구에서 백업한 PKCS#12 키도 복원할 수 있어요.",
+            "Brings in a backed up key (PKCS#12), before the first patch.",
+            "처음 패치하기 전에, 백업해 둔 키(PKCS#12)를 가져와요.",
         )
         icon = Icon.KEY
         iconTintColor = tint
-        visibleWhen(modeId, modeKey)
         action {
             val password = askKeyPassword(context, false) ?: return@action
             try {

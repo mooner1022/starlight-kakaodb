@@ -225,7 +225,8 @@ class KakaoDBPlugin : StarlightPlugin() {
                 pollMillis = POLL_INTERVALS.getOrElse(general.getInt(CONF_POLL_INTERVAL, DEF_POLL_INTERVAL)) { POLL_INTERVALS[DEF_POLL_INTERVAL] },
             ),
             configured = general.getString(CONF_ACCESS_MODE) != null,
-            autoStart = general.getBoolean(CONF_AUTO_START, true),
+            // In the connection category, with the buttons it goes with.
+            autoStart = config.category(CATEGORY_CONTROL).getBoolean(CONF_AUTO_START, true),
             ignoreOwnMessages = message.getBoolean(CONF_IGNORE_OWN, true),
             compatMessage = message.getBoolean(CONF_COMPAT_MESSAGE, false),
             compatDelete = message.getBoolean(CONF_COMPAT_DELETE, false),
@@ -467,9 +468,22 @@ class KakaoDBPlugin : StarlightPlugin() {
                 title = tr("Database", "데이터베이스")
                 textColor = color { COLOR_TITLE }
                 items {
-                    accessMode(connection.accessMode, color { COLOR_ICON })
+                    // The fuller descriptions: here the two are chosen for the first time.
+                    accessMode(
+                        connection.accessMode, color { COLOR_ICON },
+                        tr(
+                            "KakaoTalk keeps its database where other apps can't read it. Direct needs the files to be readable already, root starts a helper with su, and shared UID needs KakaoTalk and a helper patched with this plugin's tools (the steps show below once it is chosen).",
+                            "카카오톡 데이터베이스는 다른 앱이 읽을 수 없는 곳에 있어요. 직접은 파일을 이미 읽을 수 있을 때, 루트는 su로 도우미를 실행할 때, 공유 UID는 이 플러그인의 도구로 패치한 카카오톡과 도우미가 있을 때 쓰세요 (고르면 아래에 단계가 나타나요).",
+                        ),
+                    )
                     sharedUidSetupSteps(getInternalDataDirectory(), ::getAsset, CONF_ACCESS_MODE, AccessMode.SHARED.key, color { COLOR_ICON })
-                    databasePath(connection.path, color { COLOR_ICON })
+                    databasePath(
+                        connection.path, color { COLOR_ICON },
+                        tr(
+                            "The folder holding KakaoTalk.db and KakaoTalk2.db. Change it only if KakaoTalk's data is somewhere else, such as a second user or a cloned app.",
+                            "KakaoTalk.db와 KakaoTalk2.db가 있는 폴더입니다. 보조 사용자나 앱 복제본처럼 카카오톡 데이터가 다른 곳에 있을 때만 바꾸세요.",
+                        ),
+                    )
                 }
             }
         }
@@ -508,15 +522,14 @@ class KakaoDBPlugin : StarlightPlugin() {
         return null
     }
 
-    // [tint] comes from the caller: color() belongs to the builder of the whole structure, out of reach here.
-    private fun ConfigItemBuilder.databasePath(default: String, tint: Int) {
+    // The two items the initial setup and the settings share, with the same ids and keys. [tint] comes from the caller:
+    // color() belongs to the builder of the whole structure, out of reach here. So does [text], the description: the
+    // setup, where they are chosen for the first time, says more than the settings.
+    private fun ConfigItemBuilder.databasePath(default: String, tint: Int, text: String) {
         string {
             id = CONF_DB_PATH
             title = tr("Database folder", "데이터베이스 폴더")
-            description = tr(
-                "The folder holding KakaoTalk.db and KakaoTalk2.db. Change it only if KakaoTalk's data is somewhere else, such as a second user or a cloned app.",
-                "KakaoTalk.db와 KakaoTalk2.db가 있는 폴더입니다. 보조 사용자나 앱 복제본처럼 카카오톡 데이터가 다른 곳에 있을 때만 바꾸세요.",
-            )
+            description = text
             hint = DEFAULT_DB_PATH
             defaultValue = default
             require = { value -> if (value.isBlank()) tr("Enter a folder", "폴더를 입력하세요") else null }
@@ -525,14 +538,11 @@ class KakaoDBPlugin : StarlightPlugin() {
         }
     }
 
-    private fun ConfigItemBuilder.accessMode(default: AccessMode, tint: Int) {
+    private fun ConfigItemBuilder.accessMode(default: AccessMode, tint: Int, text: String) {
         choice {
             id = CONF_ACCESS_MODE
             title = tr("Access mode", "접근 방식")
-            description = tr(
-                "KakaoTalk keeps its database where other apps can't read it. Direct needs the files to be readable already, root starts a helper with su, and shared UID needs KakaoTalk and a helper patched with this plugin's tools (set up in the plugin's initial setup).",
-                "카카오톡 데이터베이스는 다른 앱이 읽을 수 없는 곳에 있어요. 직접은 파일을 이미 읽을 수 있을 때, 루트는 su로 도우미를 실행할 때, 공유 UID는 이 플러그인의 도구로 패치한 카카오톡과 도우미가 있을 때 쓰세요 (초기 설정에서 패치·설치해요).",
-            )
+            description = text
             option(AccessMode.DIRECT.key, tr("Direct: the files are readable as they are", "직접: 파일을 그대로 읽을 수 있음"))
             option(AccessMode.ROOT.key, tr("Root: read through a helper started with su", "루트: su로 띄운 도우미를 통해 읽기"))
             option(AccessMode.SHARED.key, tr("Shared UID: installed helper", "공유 UID: 설치된 도우미"))
@@ -714,40 +724,48 @@ class KakaoDBPlugin : StarlightPlugin() {
                         changeConnection(::reconnect)
                     }
                 }
-            }
-        }
-        category {
-            id = CATEGORY_GENERAL
-            title = tr("Database", "데이터베이스")
-            textColor = color { COLOR_TITLE }
-            items {
-                // The same two items as the initial setup, which holds the shared UID mode's first patch and install.
-                // What comes after it, updating the helper and the signing key, shows here while that mode is chosen.
-                accessMode(AccessMode.DIRECT, color { COLOR_ICON })
-                sharedUidMaintenance(getInternalDataDirectory(), ::getAsset, CONF_ACCESS_MODE, AccessMode.SHARED.key, color { COLOR_ICON })
-                databasePath(DEFAULT_DB_PATH, color { COLOR_ICON })
-                spinner {
-                    id = CONF_POLL_INTERVAL
-                    title = tr("Check interval", "변경 확인 주기")
-                    description = tr(
-                        "File changes are noticed right away; this also checks periodically in case they aren't.",
-                        "파일 변경은 바로 감지하고, 놓칠 경우를 대비해 이 주기로도 확인합니다.",
-                    )
-                    items = listOf(tr("Off", "끔")) + POLL_INTERVAL_LABELS
-                    defaultIndex = DEF_POLL_INTERVAL
-                    icon = Icon.TIMER
-                    iconTintColor = color { COLOR_ICON }
-                }
                 toggle {
                     id = CONF_AUTO_START
                     title = tr("Connect automatically", "자동 연결")
-                    description = tr("Connects when the plugin is enabled.", "플러그인이 켜지면 바로 연결합니다.")
+                    description = tr("Connects when the plugin is enabled.", "플러그인이 켜지면 바로 연결해요.")
                     defaultValue = true
                     icon = Icon.POWER
                     iconTintColor = color { COLOR_ICON }
                 }
             }
         }
+        // How the database is reached and watched. The first two items are the initial setup's, said shorter here.
+        category {
+            id = CATEGORY_GENERAL
+            title = tr("Database", "데이터베이스")
+            textColor = color { COLOR_TITLE }
+            items {
+                accessMode(
+                    AccessMode.DIRECT, color { COLOR_ICON },
+                    tr(
+                        "How KakaoTalk's database is read. Shared UID is first patched and installed in the initial setup.",
+                        "카카오톡 데이터베이스를 읽는 방법이에요. 공유 UID의 첫 패치·설치는 초기 설정에서 해요.",
+                    ),
+                )
+                databasePath(
+                    DEFAULT_DB_PATH, color { COLOR_ICON },
+                    tr("Change it only if KakaoTalk's data is somewhere else.", "카카오톡 데이터가 다른 곳에 있을 때만 바꾸세요."),
+                )
+                spinner {
+                    id = CONF_POLL_INTERVAL
+                    title = tr("Check interval", "변경 확인 주기")
+                    description = tr(
+                        "Also checks this often, in case a file change goes unnoticed.",
+                        "파일 변경을 놓칠 때를 대비해 이 주기로도 확인해요.",
+                    )
+                    items = listOf(tr("Off", "끔")) + POLL_INTERVAL_LABELS
+                    defaultIndex = DEF_POLL_INTERVAL
+                    icon = Icon.TIMER
+                    iconTintColor = color { COLOR_ICON }
+                }
+            }
+        }
+        // Which events fire. The two compatibility events are in this category, as their saved values are.
         category {
             id = CATEGORY_MESSAGE
             title = tr("Events", "이벤트")
@@ -756,27 +774,17 @@ class KakaoDBPlugin : StarlightPlugin() {
                 toggle {
                     id = CONF_IGNORE_OWN
                     title = tr("Ignore my messages", "내 메시지 무시")
-                    description = tr("Messages you (or your bot) send don't fire onKakaoMessage.", "내가(또는 봇이) 보낸 메시지로는 onKakaoMessage가 호출되지 않아요.")
+                    description = tr("Messages you (or your bot) send fire no event.", "내가(봇이) 보낸 메시지로는 이벤트를 호출하지 않아요.")
                     defaultValue = true
                     icon = Icon.ACCOUNT_BOX
-                    iconTintColor = color { COLOR_ICON }
-                }
-                info {
-                    id = "compat_events"
-                    title = tr("Compatibility events", "호환 이벤트")
-                    description = tr(
-                        "Also fires StarLight's own onMessage and onMessageDeleted from what the database gives.",
-                        "StarLight 기본 이벤트(onMessage, onMessageDeleted)도 데이터베이스로 받은 내용으로 호출해요.",
-                    )
-                    icon = Icon.LAYERS
                     iconTintColor = color { COLOR_ICON }
                 }
                 toggle {
                     id = CONF_COMPAT_MESSAGE
                     title = tr("onMessage compatibility event", "onMessage 호환 이벤트")
                     description = tr(
-                        "Also fires StarLight's onMessage from the database. Don't allow it in projects that use StarLight's own onMessage: messages would come twice.",
-                        "데이터베이스로 받은 메시지로 StarLight의 onMessage도 호출합니다. StarLight 기본 onMessage를 쓰는 프로젝트에서 함께 켜면 메시지를 두 번 받아요.",
+                        "Also fires onMessage from the database. With StarLight's own onMessage, messages come twice.",
+                        "DB로 받은 메시지로 onMessage도 호출해요. 기본 onMessage와 함께 쓰면 두 번 받아요.",
                     )
                     defaultValue = false
                     icon = Icon.LAYERS
@@ -785,6 +793,10 @@ class KakaoDBPlugin : StarlightPlugin() {
                 toggle {
                     id = CONF_COMPAT_DELETE
                     title = tr("onMessageDeleted compatibility event", "onMessageDeleted 호환 이벤트")
+                    description = tr(
+                        "Also fires onMessageDeleted from the database.",
+                        "DB로 받은 삭제로 onMessageDeleted도 호출해요.",
+                    )
                     defaultValue = false
                     icon = Icon.DELETE
                     iconTintColor = color { COLOR_ICON }
@@ -799,7 +811,7 @@ class KakaoDBPlugin : StarlightPlugin() {
                 seekbar {
                     id = CONF_SEND_INTERVAL
                     title = tr("Send interval (ms)", "전송 간격 (ms)")
-                    description = tr("Minimum time between messages; KakaoTalk drops replies that come too fast.", "메시지 사이의 최소 간격입니다. 너무 빠르면 카카오톡이 답장을 버려요.")
+                    description = tr("Minimum time between messages; KakaoTalk drops replies that come too fast.", "메시지 사이의 최소 간격이에요. 너무 짧으면 카카오톡이 답장을 버려요.")
                     min = 100
                     max = 3000
                     defaultValue = DEF_SEND_INTERVAL
@@ -844,6 +856,17 @@ class KakaoDBPlugin : StarlightPlugin() {
                 }
             }
         }
+        // Shared UID mode's upkeep, in a category of its own. Always there, whatever mode is saved: someone moving
+        // from the standalone setup tool restores their key here before shared UID was ever chosen, and a visibility
+        // rule couldn't follow the access mode anyway, which is in another category.
+        category {
+            id = CATEGORY_SHARED_HELPER
+            title = tr("Shared UID helper", "공유 UID 도우미")
+            textColor = color { COLOR_SUB_TITLE }
+            items {
+                sharedUidMaintenance(getInternalDataDirectory(), ::getAsset, color { COLOR_ICON })
+            }
+        }
         category {
             id = CATEGORY_LOGGING
             title = tr("Logging", "로그")
@@ -852,7 +875,7 @@ class KakaoDBPlugin : StarlightPlugin() {
                 toggle {
                     id = CONF_LOG_EVENTS
                     title = tr("Log events", "이벤트 로그 표시")
-                    description = tr("Logs every event handed to projects.", "프로젝트에 전달하는 모든 이벤트를 로그에 남깁니다.")
+                    description = tr("Logs every event handed to projects.", "프로젝트에 전달하는 모든 이벤트를 로그에 남겨요.")
                     defaultValue = false
                     icon = Icon.LIST_BULLETED
                     iconTintColor = color { COLOR_ICON }
@@ -860,7 +883,7 @@ class KakaoDBPlugin : StarlightPlugin() {
                 toggle {
                     id = CONF_VERBOSE
                     title = tr("Debug logs", "디버그 로그")
-                    description = tr("Logs every row read from the database.", "데이터베이스에서 읽은 모든 기록을 로그에 남깁니다.")
+                    description = tr("Logs every row read from the database.", "데이터베이스에서 읽은 모든 기록을 로그에 남겨요.")
                     defaultValue = false
                     icon = Icon.DEVELOPER_MODE
                     iconTintColor = color { COLOR_ICON }
@@ -878,6 +901,7 @@ class KakaoDBPlugin : StarlightPlugin() {
         const val CATEGORY_MESSAGE = "message"
         const val CATEGORY_SENDING = "sending"
         const val CATEGORY_ACCOUNT = "account"
+        const val CATEGORY_SHARED_HELPER = "shared_helper"
         const val CATEGORY_LOGGING = "logging"
 
         const val CONF_DB_PATH        = "db_path"

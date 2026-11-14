@@ -27,7 +27,7 @@ StarLight opens the plugin's **초기 설정** (initial setup) sheet when the ac
 the connection fails, with the reason on top. The user can also open it from the plugin list. It asks for the access
 mode and the database folder, and checks that the database can be read before saving. For shared UID mode it also
 holds the first installation's three steps: patch KakaoTalk and the helper, install KakaoTalk, install the helper.
-What comes later is in the plugin settings, shown while shared UID is chosen: **도우미만 다시 패치** and
+What comes later is in the plugin settings' **공유 UID 도우미** (shared UID helper) category: **도우미만 다시 패치** and
 **패치된 도우미 설치** (patch and install the helper again, when the status says the installed helper is out of date
 after a plugin update), and **서명 키 백업** and **서명 키 복원** (back up the signing key before removing StarLight
 or the plugin; restore it before the first patch after installing again).
@@ -36,8 +36,8 @@ or the plugin; restore it before the first patch after installing again).
 
 The plugin settings' **연결** (connection) category shows **상태** (status): connected with the account's name and ID,
 reconnecting, stopped, or failed with the reason, and any warnings. **연결** / **연결 끊기** (connect, disconnect) and
-**다시 연결** (reconnect) are there too. **자동 연결** (connect automatically) connects when the plugin is enabled; it
-is on by default. A connection that can't be made is tried again by itself, 5 seconds later and then less often, up to
+**다시 연결** (reconnect) are there too, with **자동 연결** (connect automatically), which connects when the plugin is
+enabled; it is on by default. A connection that can't be made is tried again by itself, 5 seconds later and then less often, up to
 every 5 minutes, and the status says so; **재시도 중지** (stop retrying) ends that. Failures that take the user, such
 as `su` being denied or missing, aren't tried again.
 
