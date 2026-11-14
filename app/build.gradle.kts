@@ -21,9 +21,9 @@ android {
         applicationId = "dev.mooner.kakaodb"
         minSdk = 26
         targetSdk = 33
-        versionCode = 1
+        versionCode = 2
         // Used as the plugin version in starlight.json.
-        versionName = "0.1.0"
+        versionName = "0.2.0"
         // What the installed shared UID helper should report (see sharedHelperBuild in the root build.gradle.kts).
         buildConfigField("String", "SHARED_HELPER_BUILD", "\"${rootProject.extra["sharedHelperBuild"]}\"")
     }
