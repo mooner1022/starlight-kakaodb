@@ -248,7 +248,9 @@ internal object RootHelper {
                 for (line in details)
                     append('\n').append(line)
                 append('\n').append(tr("(before starting it: ${cause.message})", "(시작 전 연결 실패: ${cause.message})"))
-            }
+            },
+            // A helper that was only slow (a device still booting) may make it next time; one that ended would again.
+            retryable = timedOut,
         )
     }
 

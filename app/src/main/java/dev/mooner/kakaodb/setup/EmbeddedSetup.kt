@@ -48,25 +48,32 @@ internal class EmbeddedSetup(
         val name = app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
         } ?: "input.apk"
-        val input = ApkSources.stageUri(app, uri, name, File(app.cacheDir, "kakaodb-setup-input"))
-        require(input.isNotEmpty() && ApkSources.packageOf(input.first()) == KAKAO) { "카카오톡 base APK가 아닙니다" }
-        checkMinimumSdk(input.first())
-        val original = ApkSigning.verify(input.first())
-        require(original.ok && original.certDer != null) { "카카오톡 APK 서명을 검증하지 못했습니다: ${original.issues}" }
-        for (split in input.drop(1)) {
-            require(ApkSources.packageOf(split) == KAKAO) { "다른 패키지의 split: ${split.name}" }
-            val checked = ApkSigning.verify(split)
-            require(checked.ok && checked.certDer?.contentEquals(original.certDer) == true) { "split 서명이 일치하지 않습니다: ${split.name}" }
+        val staging = File(app.cacheDir, "kakaodb-setup-input")
+        try {
+            val input = ApkSources.stageUri(app, uri, name, staging)
+            require(input.isNotEmpty() && ApkSources.packageOf(input.first()) == KAKAO) { "카카오톡 base APK가 아닙니다" }
+            checkMinimumSdk(input.first())
+            val original = ApkSigning.verify(input.first())
+            require(original.ok && original.certDer != null) { "카카오톡 APK 서명을 검증하지 못했습니다: ${original.issues}" }
+            for (split in input.drop(1)) {
+                require(ApkSources.packageOf(split) == KAKAO) { "다른 패키지의 split: ${split.name}" }
+                val checked = ApkSigning.verify(split)
+                require(checked.ok && checked.certDer?.contentEquals(original.certDer) == true) { "split 서명이 일치하지 않습니다: ${split.name}" }
+            }
+            check(keyDir.isDirectory || keyDir.mkdirs()) { "키 폴더를 만들지 못했습니다" }
+            val key = when {
+                hasKey() -> existingKey()
+                keyFile.exists() || certFile.exists() -> error("서명 키 파일이 불완전합니다. 기존 키를 복구하세요.")
+                else -> SigningKey.loadOrCreate(keyDir)
+            }
+            patchTarget(KAKAO, KAKAO_DIR, input, original.certDer!!, key)
+            patchHelper(key)
+            key.fingerprint
+        } finally {
+            // The copy of the chosen file, and what was unpacked of it: KakaoTalk's size once or twice over, of no use
+            // once patched (or refused). Only now: the patch reads from it.
+            staging.deleteRecursively()
         }
-        check(keyDir.isDirectory || keyDir.mkdirs()) { "키 폴더를 만들지 못했습니다" }
-        val key = when {
-            hasKey() -> existingKey()
-            keyFile.exists() || certFile.exists() -> error("서명 키 파일이 불완전합니다. 기존 키를 복구하세요.")
-            else -> SigningKey.loadOrCreate(keyDir)
-        }
-        patchTarget(KAKAO, KAKAO_DIR, input, original.certDer!!, key)
-        patchHelper(key)
-        key.fingerprint
     }
 
     suspend fun patchHelper(): String = work {
@@ -140,14 +147,20 @@ internal class EmbeddedSetup(
                 val files = dir.listFiles { f -> f.isFile && f.extension == "apk" }
                     ?.sortedWith(compareBy<File> { it.name != "base.apk" }.thenBy { it.name })
                     ?.takeIf { it.isNotEmpty() } ?: error(tr("There are no patched APKs.", "패치된 APK가 없습니다."))
-                suspendCancellableCoroutine { cont ->
+                // Null: installed.
+                val failure = suspendCancellableCoroutine<String?> { cont ->
                     ApkInstaller.install(app, files) { ok, message ->
-                        if (cont.isActive) cont.resume(
-                            if (ok) tr("Installed.", "설치 완료")
-                            else tr("Installation failed: $message", "설치 실패: $message")
-                        )
+                        if (cont.isActive) cont.resume(if (ok) null else message ?: "?")
                     }
                 }
+                if (failure != null)
+                    return@withLock tr("Installation failed: $failure", "설치 실패: $failure")
+                // The patched KakaoTalk is as large as KakaoTalk, and installed now: nothing reads it again. (Here, off
+                // the main thread the installer answers on.) A failed installation keeps it, to be tried again, and
+                // the helper, which is small, stays so that it can be installed again without patching.
+                if (target == KAKAO_DIR)
+                    dir.deleteRecursively()
+                tr("Installed.", "설치 완료")
             }
         }
 

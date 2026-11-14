@@ -66,11 +66,13 @@ import dev.mooner.starlight.plugincore.plugin.StarlightPlugin
 import dev.mooner.starlight.plugincore.project.Project
 import dev.mooner.starlight.plugincore.project.event.ProjectEvent
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -123,12 +125,26 @@ class KakaoDBPlugin : StarlightPlugin() {
     /** Mirrors the decoder's health into the status. Guarded by [connectionLock]. */
     private var healthJob: Job? = null
 
+    /** The next attempt after a connection that couldn't be made (see [ConnectRetry]). Guarded by [connectionLock]. */
+    private var retryJob: Job? = null
+
+    /** Attempts that failed in a row, which the wait before the next one grows with. Guarded by [connectionLock]. */
+    private var failedAttempts = 0
+
     /** compat events need a profile picture; the database has none. */
     private val placeholderProfile: Bitmap by lazy { createBitmap(1, 1) }
 
+    /**
+     * For what nothing else caught. Without it, an exception leaving one of the plugin's coroutines goes to the
+     * thread's uncaught exception handler, which is StarLight's: the whole app ends.
+     */
+    private val exceptionHandler = CoroutineExceptionHandler { _, e ->
+        LOG.error(e) { tr("Unexpected error in KakaoDB: $e", "KakaoDB에서 예기치 못한 오류가 발생했어요: $e") }
+    }
+
     override fun onEnable() {
         settings = readSettings(getPluginConfig())
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
         pluginScope = scope
 
         registerProjectEvents {
@@ -173,7 +189,7 @@ class KakaoDBPlugin : StarlightPlugin() {
         val scope = pluginScope
         pluginScope = null
         // Closing the decoder waits for its thread, which onDisable (maybe on the main thread) shouldn't.
-        CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.IO + exceptionHandler).launch {
             disconnect()
             scope?.cancel()
         }
@@ -184,9 +200,12 @@ class KakaoDBPlugin : StarlightPlugin() {
         super.onConfigUpdated(config, updated)
         val old = settings
         settings = readSettings(config)
-        // A connection that failed is tried again with the new settings: the setup it asked for may be what was just changed.
-        val retry = KakaoDBRuntime.decoder != null || KakaoDBRuntime.state.value is ConnectionState.Failed
-        if (settings.connection != old.connection && retry) {
+        // Everything but a plugin that was stopped, or never started. A connection that failed is tried again with the
+        // new settings: the setup it asked for may be what was just changed. One still being made is made again once
+        // it is: it started with the old ones (connectLocked reads them after it sets its state, so a change that
+        // finds the plugin stopped here is one it hasn't read yet).
+        val connecting = KakaoDBRuntime.state.value != ConnectionState.Stopped
+        if (settings.connection != old.connection && connecting) {
             LOG.info { tr("Database settings changed: reconnecting", "데이터베이스 설정이 바뀌어 다시 연결해요.") }
             pluginScope?.launch { reconnect() }
         }
@@ -219,7 +238,13 @@ class KakaoDBPlugin : StarlightPlugin() {
     // ------------------------------------------------------------------ connection
 
     private suspend fun connect() =
-        connectionLock.withLock { withContext(Dispatchers.IO) { connectLocked() } }
+        connectionLock.withLock {
+            withContext(Dispatchers.IO) {
+                // Asked for: this attempt takes the place of the one that was waiting, and the waits start over.
+                cancelRetryLocked()
+                connectLocked()
+            }
+        }
 
     private suspend fun disconnect() =
         connectionLock.withLock { withContext(Dispatchers.IO) { disconnectLocked() } }
@@ -232,17 +257,40 @@ class KakaoDBPlugin : StarlightPlugin() {
             }
         }
 
-    private suspend fun connectLocked() {
+    /**
+     * Connects, unless connected. [retry]: this is an attempt the plugin makes by itself after a failed one. It leaves
+     * the state as it is ([ConnectionState.Failed]) until it knows better: the status and the setup StarLight asks
+     * for would otherwise flicker with every attempt.
+     */
+    private suspend fun connectLocked(retry: Boolean = false) {
         if (KakaoDBRuntime.decoder != null)
             return
         val scope = pluginScope ?: return
+        // Before the settings are read: see onConfigUpdated.
+        if (!retry)
+            KakaoDBRuntime.setState(ConnectionState.Starting)
         val connection = settings.connection
-        KakaoDBRuntime.setState(ConnectionState.Starting)
+        try {
+            openConnection(scope, connection)
+        } catch (e: CancellationException) {
+            // Whoever asked for it went away (the settings screen closed while it connected): nothing is connecting
+            // any more, and the status mustn't go on saying so.
+            if (KakaoDBRuntime.state.value == ConnectionState.Starting)
+                KakaoDBRuntime.setState(ConnectionState.Stopped)
+            throw e
+        } catch (e: Exception) {
+            // What is known to fail is answered in openConnection. This is something nobody thought of: left alone it
+            // would end the coroutine with the status stuck at connecting.
+            LOG.error(e) { tr("Unexpected error while connecting: $e", "연결 중 예기치 못한 오류가 발생했어요: $e") }
+            fail(tr("Unexpected error while connecting: $e", "연결 중 예기치 못한 오류가 발생했어요: $e"), retryable = false)
+        }
+    }
 
+    private suspend fun openConnection(scope: CoroutineScope, connection: ConnectionSettings) {
         val dir = File(connection.path)
         val access = DatabaseAccess.of(connection.accessMode, getAsset(RootAccess.HELPER_ASSET))
         val warnings = when (val result = access.prepare(dir)) {
-            is AccessResult.Failed -> return fail(result.reason)
+            is AccessResult.Failed -> return fail(result.reason, result.retryable)
             is AccessResult.Ready  -> result.warnings.toMutableList()
         }
 
@@ -255,8 +303,29 @@ class KakaoDBPlugin : StarlightPlugin() {
             throw e
         } catch (e: Exception) {
             decoder.close()
-            return fail(tr("Failed to open the database: ${e.message ?: e}", "데이터베이스를 열지 못했어요: ${e.message ?: e}"))
+            return fail(
+                tr("Failed to open the database: ${e.message ?: e}", "데이터베이스를 열지 못했어요: ${e.message ?: e}"),
+                retryable = true,
+            )
         }
+        try {
+            startConnection(scope, connection, access, dir, decoder, warnings)
+        } catch (e: Throwable) {
+            // Nothing of a connection that didn't get all the way stays behind.
+            closeConnectionLocked()
+            decoder.close()
+            throw e
+        }
+    }
+
+    private fun startConnection(
+        scope: CoroutineScope,
+        connection: ConnectionSettings,
+        access: DatabaseAccess,
+        dir: File,
+        decoder: DatabaseDecoder,
+        warnings: MutableList<String>,
+    ) {
         if (decoder.missingTables.isNotEmpty())
             warnings += tr("Tables missing: ${decoder.missingTables.joinToString()}", "없는 테이블: ${decoder.missingTables.joinToString()}")
         when (val source = decoder.friendSource) {
@@ -276,6 +345,7 @@ class KakaoDBPlugin : StarlightPlugin() {
                 "내 사용자 ID를 찾지 못했어요. 내 메시지를 구분하려면 계정 설정에서 직접 입력하세요.",
             )
 
+        failedAttempts = 0
         KakaoDBRuntime.decoder = decoder
         val mapper = ScriptMapper(decoder.selfID)
         val triggers = DatabaseWatcher.triggers(access.fileChanges(dir), connection.pollMillis)
@@ -302,6 +372,14 @@ class KakaoDBPlugin : StarlightPlugin() {
     }
 
     private fun disconnectLocked() {
+        cancelRetryLocked()
+        if (closeConnectionLocked())
+            LOG.info { tr("Disconnected from the KakaoTalk database", "카카오톡 데이터베이스 연결을 끊었어요.") }
+        KakaoDBRuntime.setState(ConnectionState.Stopped)
+    }
+
+    /** Stops the watch and closes the decoder; tells whether there was one. Leaves the state to the caller. */
+    private fun closeConnectionLocked(): Boolean {
         watchJob?.cancel()
         watchJob = null
         healthJob?.cancel()
@@ -309,20 +387,62 @@ class KakaoDBPlugin : StarlightPlugin() {
         val decoder = KakaoDBRuntime.decoder
         KakaoDBRuntime.decoder = null
         decoder?.close()
-        if (decoder != null)
-            LOG.info { tr("Disconnected from the KakaoTalk database", "카카오톡 데이터베이스 연결을 끊었어요.") }
-        KakaoDBRuntime.setState(ConnectionState.Stopped)
+        return decoder != null
     }
 
-    private fun fail(reason: String) {
-        KakaoDBRuntime.setState(ConnectionState.Failed(reason))
+    /**
+     * The connection couldn't be made, for [reason]. When that may pass by itself ([retryable]), another attempt is
+     * scheduled. An attempt that failed the way the one before it did says nothing more: the log and StarLight were
+     * told then.
+     */
+    private fun fail(reason: String, retryable: Boolean) {
+        val scope = pluginScope
+        val retrying = retryable && scope != null
+        val repeated = (KakaoDBRuntime.state.value as? ConnectionState.Failed)?.reason == reason
+        KakaoDBRuntime.setState(ConnectionState.Failed(reason, retrying))
+        val wait = if (retrying) scheduleRetryLocked(scope) else null
+        if (repeated)
+            return
         LOG.error { reason }
+        if (wait != null)
+            LOG.info {
+                tr(
+                    "Trying to connect again in ${wait / 1000}s, then less often for as long as it fails.",
+                    "${wait / 1000}초 뒤에 다시 연결해 봐요. 계속 실패하면 간격을 늘려 가며 시도해요.",
+                )
+            }
         // isSetupRequired() follows the state, so it is true by now: tell StarLight, which opens the setup if it can.
         try {
             requestSetup()
         } catch (_: LinkageError) {
             // A StarLight from before the setup dialog: nothing listens, and the plugin settings still work.
         }
+    }
+
+    /** Schedules the next attempt, and tells how long until it. */
+    private fun scheduleRetryLocked(scope: CoroutineScope): Long {
+        failedAttempts++
+        val wait = ConnectRetry.delayMillis(failedAttempts)
+        retryJob = scope.launch {
+            val self = coroutineContext[Job]
+            delay(wait)
+            connectionLock.withLock {
+                // Not when something else connected, stopped, or scheduled another attempt meanwhile. Cleared before
+                // connecting: this attempt is no longer one to cancel, and may schedule the next.
+                if (retryJob !== self)
+                    return@withLock
+                retryJob = null
+                withContext(Dispatchers.IO) { connectLocked(retry = true) }
+            }
+        }
+        return wait
+    }
+
+    /** Drops the attempt that is waiting, if any; the waits start over from the shortest. */
+    private fun cancelRetryLocked() {
+        retryJob?.cancel()
+        retryJob = null
+        failedAttempts = 0
     }
 
     // ------------------------------------------------------------------ initial setup
@@ -535,8 +655,27 @@ class KakaoDBPlugin : StarlightPlugin() {
                 )
                 ConnectionState.Starting   -> tr("Connecting...", "연결 중...")
                 ConnectionState.Stopped    -> null
-                is ConnectionState.Failed  -> state.reason
+                is ConnectionState.Failed  ->
+                    if (state.retrying)
+                        state.reason + "\n" + tr(
+                            "Trying again by itself, less often for as long as it fails.",
+                            "자동으로 다시 시도하고 있어요. 계속 실패하면 간격을 늘려요.",
+                        )
+                    else
+                        state.reason
             }
+        }
+
+    /** What the connection button does now: also stops the attempts the plugin makes by itself after a failure. */
+    private fun stopsConnection(state: ConnectionState): Boolean =
+        state is ConnectionState.Running || state is ConnectionState.Reconnecting ||
+            (state is ConnectionState.Failed && state.retrying)
+
+    private fun connectionButtonTitle(state: ConnectionState): String =
+        when {
+            state is ConnectionState.Failed && state.retrying -> tr("Stop retrying", "재시도 중지")
+            stopsConnection(state)                            -> tr("Disconnect", "연결 끊기")
+            else                                              -> tr("Connect", "연결")
         }
 
     private fun sendableRooms(): List<String> =
@@ -557,14 +696,14 @@ class KakaoDBPlugin : StarlightPlugin() {
                 }
                 button {
                     id = "toggle_connection"
-                    title = if (KakaoDBRuntime.decoder != null) tr("Disconnect", "연결 끊기") else tr("Connect", "연결")
-                    bindTitle(KakaoDBRuntime.state.map { state ->
-                        if (state is ConnectionState.Running || state is ConnectionState.Reconnecting) tr("Disconnect", "연결 끊기")
-                        else tr("Connect", "연결")
-                    })
+                    title = connectionButtonTitle(KakaoDBRuntime.state.value)
+                    bindTitle(KakaoDBRuntime.state.map(::connectionButtonTitle))
                     icon = Icon.POWER
                     action {
-                        changeConnection { if (KakaoDBRuntime.decoder != null) disconnect() else connect() }
+                        changeConnection {
+                            if (KakaoDBRuntime.decoder != null || stopsConnection(KakaoDBRuntime.state.value)) disconnect()
+                            else connect()
+                        }
                     }
                 }
                 button {

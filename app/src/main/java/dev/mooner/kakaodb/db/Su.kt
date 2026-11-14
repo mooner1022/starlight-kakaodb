@@ -56,5 +56,8 @@ internal object Su {
     }
 }
 
-/** Root access failed; the message is meant for the user. */
-class RootException(message: String) : Exception(message)
+/**
+ * Root access failed; the message is meant for the user. Most of these take the user (su is missing, was denied, or
+ * its prompt went unanswered) or would fail the same way again; [retryable] marks the few that may pass by themselves.
+ */
+class RootException(message: String, val retryable: Boolean = false) : Exception(message)

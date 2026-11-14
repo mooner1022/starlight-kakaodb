@@ -72,5 +72,10 @@ sealed class ConnectionState {
     /** Was connected, but the connection broke and couldn't be reopened yet; the decoder keeps trying. */
     data class Reconnecting(val reason: String, val retryAt: Long) : ConnectionState()
 
-    data class Failed(val reason: String) : ConnectionState()
+    /**
+     * The connection couldn't be made. While [retrying], the plugin tries again by itself (see [ConnectRetry]) and
+     * stays in this state meanwhile. [reason] is what failed and nothing else (no times, no counts): StarLight
+     * remembers a setup dialog the user closed by it.
+     */
+    data class Failed(val reason: String, val retrying: Boolean = false) : ConnectionState()
 }

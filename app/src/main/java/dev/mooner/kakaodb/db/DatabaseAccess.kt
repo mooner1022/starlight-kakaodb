@@ -64,7 +64,12 @@ sealed class AccessResult {
     /** The files can be read. [warnings] are things that may still make the connection fail. */
     data class Ready(val warnings: List<String> = emptyList()) : AccessResult()
 
-    data class Failed(val reason: String) : AccessResult()
+    /**
+     * The files can't be read, for [reason]. [retryable]: it may pass by itself (KakaoTalk hasn't opened its database
+     * yet, the helper isn't up...), so trying again later is worth it. Not when it takes the user, and trying again
+     * would only run su on them once more.
+     */
+    data class Failed(val reason: String, val retryable: Boolean = true) : AccessResult()
 }
 
 /** Reads the files as they are; only checks that this process can. */
@@ -144,7 +149,7 @@ class RootAccess(helperApk: File) : DatabaseAccess {
                 DB_FILES.associateWith { channel.input.readUnsignedByte() }
             }
         } catch (e: RootException) {
-            return AccessResult.Failed(e.message ?: e.toString())
+            return AccessResult.Failed(e.message ?: e.toString(), retryable = e.retryable)
         } catch (e: IOException) {
             return AccessResult.Failed(
                 tr("The root helper stopped answering: ${e.message}", "루트 도우미가 응답하지 않아요: ${e.message}")

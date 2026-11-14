@@ -60,9 +60,9 @@ class SendQueue(
             for (input in inputs)
                 putCharSequence(input.resultKey, request.text)
         }
-        val intent = Intent()
-        RemoteInput.addResultsToIntent(inputs, intent, results)
         try {
+            val intent = Intent()
+            RemoteInput.addResultsToIntent(inputs, intent, results)
             actions.reply.actionIntent.send(actions.context, 0, intent)
         } catch (_: PendingIntent.CanceledException) {
             store.invalidate(actions)
@@ -72,6 +72,10 @@ class SendQueue(
                     "방 ${request.roomId} 에 전송하지 못했어요: 답장 기능이 만료됐어요. 이 방의 새 알림이 필요해요.",
                 )
             }
+        } catch (e: Exception) {
+            // Whatever else Android answers with (a SecurityException...) costs this message, not the queue: left
+            // uncaught it would end the loop, and StarLight with it.
+            LOG.error(e) { tr("Failed to send to room ${request.roomId}: $e", "방 ${request.roomId} 에 전송하지 못했어요: $e") }
         }
     }
 

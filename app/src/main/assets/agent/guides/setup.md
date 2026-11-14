@@ -37,7 +37,9 @@ or the plugin; restore it before the first patch after installing again).
 The plugin settings' **연결** (connection) category shows **상태** (status): connected with the account's name and ID,
 reconnecting, stopped, or failed with the reason, and any warnings. **연결** / **연결 끊기** (connect, disconnect) and
 **다시 연결** (reconnect) are there too. **자동 연결** (connect automatically) connects when the plugin is enabled; it
-is on by default.
+is on by default. A connection that can't be made is tried again by itself, 5 seconds later and then less often, up to
+every 5 minutes, and the status says so; **재시도 중지** (stop retrying) ends that. Failures that take the user, such
+as `su` being denied or missing, aren't tried again.
 
 From a script, `KakaoDB.isConnected` tells whether queries work now. Each connection starts at the database's newest
 row: events come only for what is stored while connected, never for older messages, and messages stored while the
