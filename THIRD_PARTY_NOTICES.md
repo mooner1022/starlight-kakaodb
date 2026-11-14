@@ -4,7 +4,7 @@
 
 The setup tool includes the patch engine and stub from [HayulGUI](https://github.com/dolidolih/HayulGUI),
 revision `bb4e934dbb6002a01bcf28ed244b5292378ce228`, with local changes: the Gradle build files
-(`starlight.gradle`), stream reads that work below Android API 33, installer messages, and manifest attributes inserted in
+(`starlight.gradle.kts`), stream reads that work below Android API 33, installer messages, and manifest attributes inserted in
 resource id order (marked `[kakaodb]`). The upstream MIT license and full attribution are in
 `vendor/HayulGUI/LICENSE` and `vendor/HayulGUI/NOTICE`. The MIT permission notice below applies to these
 portions as well. The bundled `com.android.tools.build:apksig` is licensed under Apache License 2.0;

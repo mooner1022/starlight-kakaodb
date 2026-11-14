@@ -291,7 +291,7 @@ final class CryptoUserDatabase implements RootDaemon.Database {
             }
             throw new FileNotFoundException(
                 NATIVE_LIB + " isn't built for this device's ABIs " + Arrays.toString(abis) + " (the helper has "
-                    + abisIn(zip) + "): add one to abiFilters in rootd/build.gradle");
+                    + abisIn(zip) + "): add one to abiFilters in rootd/build.gradle.kts");
         }
     }
 

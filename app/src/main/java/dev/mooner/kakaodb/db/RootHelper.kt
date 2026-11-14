@@ -25,7 +25,7 @@ import kotlin.concurrent.thread
 /**
  * Starts and reaches the root helper ([dev.mooner.kakaodb.rootd.RootDaemon]).
  *
- * The helper is the plugin asset [HelperApk] (:rootd's APK, see rootdApk in app/build.gradle), copied by su out of
+ * The helper is the plugin asset [HelperApk] (:rootd's APK, see rootdApk in app/build.gradle.kts), copied by su out of
  * StarLight's data and run under app_process. It listens on an abstract socket named after this app's uid, and trust has to go both
  * ways there:
  * - the helper only answers this uid holding [token]: every StarLight plugin runs as this uid;
@@ -260,7 +260,7 @@ internal object RootHelper {
 
 /**
  * The helper's APK: the plugin asset [ASSET], which StarLight extracts into the plugin's data (StarlightPlugin.getAsset)
- * whenever assetRevision changes (app/build.gradle derives it from :rootd's sources).
+ * whenever assetRevision changes (app/build.gradle.kts derives it from :rootd's sources).
  */
 internal class HelperApk(val file: File) {
 
@@ -281,7 +281,7 @@ internal class HelperApk(val file: File) {
     }
 
     companion object {
-        /** :rootd's APK, copied by rootdApk in app/build.gradle. */
+        /** :rootd's APK, copied by rootdApk in app/build.gradle.kts. */
         const val ASSET = "rootd.apk"
 
         private val builds = ConcurrentHashMap<String, String>()

@@ -1,0 +1,42 @@
+// The shared UID helper. The setup tool (:setup) patches this APK into KakaoTalk's sharedUserId and re-signs it with
+// the same key as KakaoTalk; installed that way it runs as KakaoTalk's UID and serves the plugin through SharedService.
+// It compiles :rootd's sources: the same RootDaemon protocol code, restricted to KakaoTalk's database directory.
+plugins {
+    id("com.android.application")
+}
+
+android {
+    namespace = "dev.mooner.kakaodb.sharedd"
+    compileSdk = 35
+    defaultConfig {
+        applicationId = "dev.mooner.kakaodb.sharedd"
+        minSdk = 26
+        targetSdk = 33
+        versionCode = 1
+        versionName = "1.0"
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        // Reported to the plugin, which warns when it isn't its own (see sharedHelperBuild in the root
+        // build.gradle.kts).
+        buildConfigField("String", "SHARED_HELPER_BUILD", "\"${rootProject.extra["sharedHelperBuild"]}\"")
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+    // HayulGUI verifies the input APK before re-signing it with the shared-UID key, so any key does here.
+    buildTypes { release { signingConfig = signingConfigs.getByName("debug") } }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+    sourceSets {
+        getByName("main") {
+            java.srcDir("../rootd/src/main/java")
+            java.srcDir("../rootd/src/protocol/java")
+        }
+    }
+}
+
+dependencies {
+    implementation("net.zetetic:sqlcipher-android:4.13.0")
+    implementation("androidx.sqlite:sqlite:2.7.0")
+}

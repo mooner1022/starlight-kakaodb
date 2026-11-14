@@ -35,7 +35,7 @@ Gradle 8.13은 JDK 24 이상에서 실행되지 않으니 JDK 17~21을 쓰세요
 
 StarLight 1.1.0의 StarLight AI는 플러그인 패키지에서 두 가지를 읽어요. 둘 다 빌드에 포함되고, 따로 등록할 것은 없어요.
 
-- **KDoc**: `app/build.gradle`에 적용한 KSP로 StarLight Gradle 플러그인(0.5.0)이 공개 클래스의 KDoc과 Kotlin 시그니처를 `starlight/agent/kakaodb.api.json`으로 뽑아요. 스크립트가 닿는 클래스(`KakaoClient`, `script/`의 객체, `MediaInfo`·`LocationInfo`·`EmoticonInfo`, `event/`의 이벤트)는 공개 멤버마다 KDoc을 달아 주세요. 이벤트 클래스의 KDoc에는 스크립트 함수 인자마다 `@param`을 써요. 문서는 영어로 쓰고, 규칙은 StarLight 저장소의 `docs/agent-docs.md` 3절을 따라요.
+- **KDoc**: `app/build.gradle.kts`에 적용한 KSP로 StarLight Gradle 플러그인(0.5.0)이 공개 클래스의 KDoc과 Kotlin 시그니처를 `starlight/agent/kakaodb.api.json`으로 뽑아요. 스크립트가 닿는 클래스(`KakaoClient`, `script/`의 객체, `MediaInfo`·`LocationInfo`·`EmoticonInfo`, `event/`의 이벤트)는 공개 멤버마다 KDoc을 달아 주세요. 이벤트 클래스의 KDoc에는 스크립트 함수 인자마다 `@param`을 써요. 문서는 영어로 쓰고, 규칙은 StarLight 저장소의 `docs/agent-docs.md` 3절을 따라요.
 - **가이드**: `app/src/main/assets/agent/guides/<id>.md`. `title`과 `summary`가 있는 front matter로 시작해야 하고 BOM이 없어야 해요. KDoc에서는 `@see guide:<id>`로, 가이드끼리는 `guide:<id>` 링크로 가리켜요.
 
 `assembleReleaseSlp`가 `i: [StarLight] StarLight AI docs: … classes in starlight/agent/kakaodb.api.json, … guides` 줄로 결과를 알려 줘요. 기기에서는 StarLight의 **설정 → 개발자 모드 → StarLight AI 문서**에서 AI가 보는 그대로 확인할 수 있어요.
@@ -145,8 +145,8 @@ Android 10 이상에서는 다른 앱 데이터에 SELinux MLS 카테고리가 �
 
 - **도우미**: `rootd` 모듈(Java)이 설치하지 않는 APK를 따로 빌드하고, 플러그인은 이걸 asset `rootd.apk`로 실어요. StarLight가 풀어 둔 이 파일을 연결할 때 su로 `/data/local/tmp/dev.mooner.kakaodb/build/<빌드>/`에 복사하고 `app_process`로 실행해요. 프로세스 이름은 `kakaodb-rootd`이고, 로그는 `/data/local/tmp/dev.mooner.kakaodb/rootd-<uid>.log`와 logcat(태그 `kakaodb-rootd`)에 남아요.
   - APK 모듈인 이유는 SQLCipher(`net.zetetic:sqlcipher-android`) 때문이에요. AGP가 aar과 네이티브 라이브러리를 처리하고, 도우미는 실행될 때 자기 APK에서 `libsqlcipher.so`를 꺼내 로드해요.
-  - `libsqlcipher.so`는 ABI마다 4~5MB라 `arm64-v8a`, `x86_64`만 넣어요. 32비트 전용 기기라면 `rootd/build.gradle`의 `abiFilters`에 `armeabi-v7a`를 추가하세요.
-  - StarLight는 `assetRevision`이 바뀔 때만 asset을 다시 풀어요. 그래서 `app/build.gradle`이 `rootd` 소스·`rootd/build.gradle`·`src/main/assets`의 내용으로 `assetRevision`을 계산해요. 이 파일들에 드러나지 않는 변경(AGP 버전 등)을 기기에 반영하려면 `assetRevisionOf`의 `SALT`를 바꿔 주세요.
+  - `libsqlcipher.so`는 ABI마다 4~5MB라 `arm64-v8a`, `x86_64`만 넣어요. 32비트 전용 기기라면 `rootd/build.gradle.kts`의 `abiFilters`에 `armeabi-v7a`를 추가하세요.
+  - StarLight는 `assetRevision`이 바뀔 때만 asset을 다시 풀어요. 그래서 `app/build.gradle.kts`가 `rootd` 소스·`rootd/build.gradle.kts`·`src/main/assets`의 내용으로 `assetRevision`을 계산해요. 이 파일들에 드러나지 않는 변경(AGP 버전 등)을 기기에 반영하려면 `assetRevisionOf`의 `SALT`를 바꿔 주세요.
 - **읽기**: 도우미가 원본 DB를 읽기 전용으로 열고, 플러그인은 추상 UNIX 소켓으로 SQL을 보내 결과를 받아요. 복사하지 않으니 카카오톡이 커밋하는 대로 바로 보이고, 파일 변경은 도우미의 inotify가 알려 줘요(변경 확인 주기 설정도 그대로 동작해요).
 - **보안**: 소켓은 StarLight의 uid만 접속할 수 있고, 같은 uid를 쓰는 다른 플러그인을 막기 위해 연결마다 토큰을 확인해요. 플러그인 쪽도 소켓 주인이 root인지 확인한 뒤에만 토큰을 보내요.
 - **생명주기**: 연결이 모두 끊기고 30초가 지나면 도우미는 스스로 종료돼요. StarLight를 다시 시작하거나 플러그인을 업데이트하면 이전 도우미를 종료하고 새로 띄워요(이때 루팅 관리 앱이 su 알림을 띄울 수 있어요).
