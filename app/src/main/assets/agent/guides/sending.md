@@ -4,8 +4,8 @@ summary: How KakaoDB sends messages through KakaoTalk notifications' reply actio
 ---
 
 The database can only be read, so KakaoDB sends the way StarLight does: through the reply action of KakaoTalk's
-notification for the room, as if the user typed a reply in the notification. `room.send(text)`, `msg.reply(text)` and
-`KakaoDB.send(roomId, text)` all do this, and send text only.
+notification for the room, as if the user typed a reply in the notification. `room.send(text)` (in an event function,
+`event.room.send(text)`, whatever the event) and `KakaoDB.send(roomId, text)` both do this, and send text only.
 
 ## Which rooms can be sent to
 
@@ -36,9 +36,8 @@ between them: 600 ms by default, from 100 to 3000. KakaoTalk drops replies that 
 
 ## Marking as read
 
-`room.markAsRead()`, `msg.markAsRead()` and `KakaoDB.markAsRead(roomId)` use the notification's "mark as read"
-action, with the same condition: a notification from the room since StarLight started. They return `false` without
-one.
+`room.markAsRead()` and `KakaoDB.markAsRead(roomId)` use the notification's "mark as read" action, with the same
+condition: a notification from the room since StarLight started. They return `false` without one.
 
 ## Files
 

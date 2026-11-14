@@ -10,9 +10,12 @@ import dev.mooner.kakaodb.core.model.Mention
 import dev.mooner.kakaodb.core.parser.kakaoJson
 
 /**
- * A KakaoTalk message, read from the database: what `onKakaoMessage(msg)` receives, and what queries return.
+ * A KakaoTalk message, read from the database: `event.message` in `onKakaoMessage(event)` and
+ * `onKakaoMessageDeleted(event)`, and what queries return.
  *
  * Its values are as the database had them when it was read; methods marked as reading the database read it again.
+ * It only describes the message: sending and marking as read go through its room, `event.room.send(text)` or
+ * `msg.room.send(text)`.
  *
  * @see guide:scripting#replies-and-threads
  */
@@ -120,28 +123,6 @@ class KakaoMessage internal constructor(
      */
     val attachmentJson: String? by lazy { chat.rawAttachment?.toString() }
 
-    /** Database queries and sending: the same object as the global `KakaoDB`. */
-    val db: KakaoClient
-        get() = KakaoDBRuntime.client
-
-    /**
-     * Sends a text message to this message's room, as [KakaoRoom.send] does.
-     *
-     * @param text The message to send.
-     * @return Whether the message was queued; `false` if no notification from the room was seen since StarLight started.
-     * @see guide:sending
-     */
-    fun reply(text: String): Boolean =
-        room.send(text)
-
-    /**
-     * Marks this message's room as read, as [KakaoRoom.markAsRead] does.
-     *
-     * @return Whether KakaoTalk took the request.
-     */
-    fun markAsRead(): Boolean =
-        room.markAsRead()
-
     /**
      * The message the thread hangs from, for a message posted in an open chat thread. Reads the database on each call.
      *
@@ -186,7 +167,7 @@ class KakaoMention internal constructor(mention: Mention) {
 
 /** The message a `REPLY` message quotes, as the reply recorded it. */
 class KakaoReplyInfo internal constructor(
-    /** The quoted message's ID: `db.getMessage(msg.roomId, msg.replyTo.id)` reads the whole message. */
+    /** The quoted message's ID: `KakaoDB.getMessage(msg.roomId, msg.replyTo.id)` reads the whole message. */
     val id: String,
     /** The quoted message's sender's user ID. */
     val senderId: String,

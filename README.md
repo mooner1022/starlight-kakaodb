@@ -165,19 +165,19 @@ Android 10 이상에서는 다른 앱 데이터에 SELinux MLS 카테고리가 �
 
 ## 이벤트
 
-프로젝트 설정에서 사용할 이벤트를 켜야 호출됩니다.
+프로젝트 설정에서 사용할 이벤트를 켜야 호출됩니다. 모든 이벤트 함수는 이벤트 객체 하나(`event`)를 받고, 메시지를 보낼 때는 이벤트와 상관없이 `event.room.send(text)`를 써요.
 
 | 이벤트 ID | 함수 | 인자 |
 |---|---|---|
-| `kakaodb.message.create` | `onKakaoMessage(msg)` | `KakaoMessage` |
+| `kakaodb.message.create` | `onKakaoMessage(event)` | `KakaoMessageEvent` (메시지는 `event.message`) |
 | `kakaodb.message.delete` | `onKakaoMessageDeleted(event)` | `KakaoMessageDeletedEvent` |
 | `kakaodb.message.hide` | `onKakaoMessageHidden(event)` | `KakaoMessageHiddenEvent` |
 | `kakaodb.member.join` | `onKakaoMemberJoined(event)` | `KakaoMemberJoinedEvent` |
 | `kakaodb.member.leave` | `onKakaoMemberLeft(event)` | `KakaoMemberLeftEvent` |
 | `kakaodb.member.role` | `onKakaoMemberRoleChanged(event)` | `KakaoMemberRoleChangedEvent` |
 | `kakaodb.room.feed` | `onKakaoFeed(event)` | `KakaoFeedEvent` (모든 피드, 위 이벤트에 해당하는 것도 포함) |
-| `kakaodb.compat.on_message` | `onMessage(msg)` | StarLight `Message` |
-| `kakaodb.compat.on_message_deleted` | `onMessageDeleted(msg)` | StarLight `DeletedMessage` |
+| `kakaodb.compat.on_message` | `onMessage(event)` | StarLight `Message` |
+| `kakaodb.compat.on_message_deleted` | `onMessageDeleted(event)` | StarLight `DeletedMessage` |
 
 이벤트는 연결한 뒤에 DB에 새로 추가된 기록에 대해서만 발생합니다. 전역 전원이 꺼져 있으면 전달하지 않아요.
 
@@ -199,6 +199,8 @@ Android 10 이상에서는 다른 앱 데이터에 SELinux MLS 카테고리가 �
 
 ### KakaoMessage
 
+`onKakaoMessage`·`onKakaoMessageDeleted`의 `event.message`, `onKakaoMessageHidden`의 `event.messages`, 메시지 조회 결과예요. 메시지 자체는 보내기·읽음 처리를 하지 않으니 방(`event.room`, `msg.room`)으로 하세요. 아래에서 `msg`는 `KakaoMessage`를 가리켜요.
+
 | 이름 | 설명 |
 |---|---|
 | `id`, `roomId`, `senderId` | 로그 ID, 방 ID, 보낸 사람 ID |
@@ -214,8 +216,6 @@ Android 10 이상에서는 다른 앱 데이터에 SELinux MLS 카테고리가 �
 | `location`, `emoticon` | 위치(`latitude`, `longitude`, `address`, `title`), 이모티콘 정보 |
 | `attachmentJson` | 복호화된 첨부 원본 JSON 문자열 |
 | `room`, `sender` | `KakaoRoom`, `KakaoUser` |
-| `db` | `KakaoClient` |
-| `reply(text)`, `markAsRead()` | 같은 방에 전송 / 읽음 처리 |
 | `getUnreadCount()` | 이 메시지를 안 읽은 멤버 수. 호출할 때마다 DB에서 읽고, 알 수 없으면 -1 |
 | `toJson()` | 원본 기록 JSON |
 
@@ -249,12 +249,13 @@ var target = msg.replyTo != null ? msg.replyTo.id : msg.threadId;
 
 `id`, `name`, `kind`(`self`/`friend`/`open_member`/`unknown`), `profileImageUrl`, `fullProfileImageUrl`, `statusMessage`(친구), `memberType`(오픈채팅: `HOST`/`MANAGER`/`NORMAL`/`BOT`), `isMe`, `isFriend`, `isHost`, `isManager`, `toJson()`
 
-### 피드 이벤트 공통
+### 이벤트 공통
 
-`room`, `logId`(피드 기록 ID), `actor`(피드 기록의 사용자, 보통 그 일을 한 사람), `createdAt`, `db`
+`room`, `logId`(이벤트가 나온 메시지나 피드의 기록 ID), `actor`(그 기록의 사용자: 새 메시지는 보낸 사람, 피드는 보통 그 일을 한 사람), `createdAt`, `db`
 
 | 객체 | 추가 속성 |
 |---|---|
+| `KakaoMessageEvent` | `message` (`KakaoMessage`). `actor`는 `message.sender`와 같은 객체이고 null이 아니에요 |
 | `KakaoMessageDeletedEvent` | `messageId`, `message` (DB에 남아 있으면 `KakaoMessage`, 없으면 null) |
 | `KakaoMessageHiddenEvent` | `messageIds`, `messages` |
 | `KakaoMemberJoinedEvent` | `members`, `inviter` (오픈채팅 입장이면 null), `isOpenLinkJoin` |
@@ -264,7 +265,7 @@ var target = msg.replyTo != null ? msg.replyTo.id : msg.threadId;
 
 ### KakaoClient (전역 `KakaoDB`, `event.db`)
 
-전역 `KakaoDB`와 이벤트 객체의 `db`(`msg.db`, `event.db`)는 같은 객체예요. NeonJS도 StarLight 스냅샷 1000105부터 플러그인 API 전역 객체를 받아요. 그보다 오래된 StarLight의 NeonJS에서는 `msg.db`/`event.db`를 쓰세요.
+전역 `KakaoDB`와 이벤트 객체의 `event.db`는 같은 객체예요. NeonJS도 StarLight 스냅샷 1000105부터 플러그인 API 전역 객체를 받아요. 그보다 오래된 StarLight의 NeonJS에서는 `event.db`를 쓰세요.
 
 | 함수 | 설명 |
 |---|---|
@@ -279,25 +280,26 @@ var target = msg.replyTo != null ? msg.replyTo.id : msg.threadId;
 
 조회 함수는 DB 응답을 기다리는 동안 멈춰 있으니(최대 15초) 이벤트 함수 안에서 쓰세요. 연결되지 않은 상태에서 호출하면 예외가 발생합니다.
 
-`getRoom`과 `getRooms`는 호출한 시점의 방을 DB에서 읽어요. 이벤트 객체의 `room`(`msg.room` 등)은 플러그인이 캐시해 둔 값이라, `unreadMessageCount` 같은 값은 최대 5분 전 것일 수 있어요. 지금 값이 필요하면 `KakaoDB.getRoom(room.id)`로 다시 읽으세요.
+`getRoom`과 `getRooms`는 호출한 시점의 방을 DB에서 읽어요. 이벤트 객체의 `room`(`event.room`, `msg.room` 등)은 플러그인이 캐시해 둔 값이라, `unreadMessageCount` 같은 값은 최대 5분 전 것일 수 있어요. 지금 값이 필요하면 `KakaoDB.getRoom(room.id)`로 다시 읽으세요.
 
 ## 예시
 
 Rhino:
 
 ```js
-function onKakaoMessage(msg) {
+function onKakaoMessage(event) {
+    var msg = event.message;
     if (msg.text == "!읽음") {
-        msg.reply("안 읽은 사람: " + msg.getUnreadCount() + "명");
+        event.room.send("안 읽은 사람: " + msg.getUnreadCount() + "명");
     }
     if (msg.replyTo != null && msg.text == "!원본") {
-        msg.reply("원본: " + msg.replyTo.text);
+        event.room.send("원본: " + msg.replyTo.text);
     }
     // 오픈채팅에서 봇 메시지에 스레드로 단 답글
     if (msg.isThreadMessage) {
         var root = msg.getThreadRoot();
         if (root != null && root.isMine)
-            msg.reply("내 메시지에 답글을 달았어요: " + root.text);
+            event.room.send("내 메시지에 답글을 달았어요: " + root.text);
     }
 }
 
@@ -315,13 +317,13 @@ function onKakaoMessageDeleted(event) {
 NeonJS:
 
 ```js
-export function onKakaoMessage(msg) {
-    if (msg.text === "!방목록") {
-        const rooms = msg.db.getRooms();
+export function onKakaoMessage(event) {
+    if (event.message.text === "!방목록") {
+        const rooms = event.db.getRooms();
         const names = [];
         for (let i = 0; i < Math.min(rooms.size(), 10); i++)
             names.push(rooms.get(i).name);
-        msg.reply(names.join("\n"));
+        event.room.send(names.join("\n"));
     }
 }
 ```

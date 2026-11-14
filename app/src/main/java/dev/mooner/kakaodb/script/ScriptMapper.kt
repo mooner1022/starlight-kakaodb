@@ -33,7 +33,10 @@ internal class ScriptMapper(val selfId: Long) {
         val createdAt = chat.createdAt * 1000L
         return when (event) {
             is KakaoEvent.LogCreated        -> null
-            is KakaoEvent.MessageCreated    -> message(chat, room)
+            // The sender as actor: unlike the feeds' actor, never null.
+            is KakaoEvent.MessageCreated    -> message(chat, room).let { message ->
+                KakaoMessageEvent(room, logId, message.sender, createdAt, message)
+            }
             is KakaoEvent.Feed              -> KakaoFeedEvent(
                 room, logId, actor, createdAt,
                 feedType = event.feed.feedType?.name ?: "UNKNOWN",

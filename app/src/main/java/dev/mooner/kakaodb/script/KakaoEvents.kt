@@ -3,21 +3,21 @@ package dev.mooner.kakaodb.script
 import dev.mooner.kakaodb.KakaoDBRuntime
 
 /**
- * What every KakaoDB event besides new messages has: the room, and the feed (system message) the event was read from.
+ * What every KakaoDB event has: the room, and the log (a message, or a feed) the event was read from.
  *
- * KakaoTalk records joins, leaves, deletions and the like as feeds in the room's messages; each of these events is one
- * such feed.
+ * A new message is one log. KakaoTalk records joins, leaves, deletions and the like as feeds (system messages) among
+ * the room's messages; each of the other events is one such feed.
  *
  * @see guide:events
  */
 abstract class KakaoRoomEvent internal constructor(
-    /** The room the event happened in. */
+    /** The room the event happened in: `event.room.send(text)` sends to it. */
     val room: KakaoRoom,
-    /** The ID of the feed the event was read from. */
+    /** The ID of the log the event was read from: the new message's ID, or the feed's. */
     val logId: String,
     /**
-     * The user the feed was recorded for: usually who caused the event (who deleted, invited, kicked...); `null` if the
-     * database has no such user.
+     * The user the log was recorded for: for a feed usually who caused the event (who deleted, invited, kicked...),
+     * `null` if the database has no such user; for a new message its sender, never `null`.
      */
     val actor: KakaoUser?,
     /** When the event happened, as Unix time in milliseconds. */
@@ -26,6 +26,22 @@ abstract class KakaoRoomEvent internal constructor(
     /** Database queries and sending: the same object as the global `KakaoDB`. */
     val db: KakaoClient
         get() = KakaoDBRuntime.client
+}
+
+/**
+ * A message was stored in KakaoTalk's database: [message] is the message, and [actor] its sender, the same object as
+ * `event.message.sender`.
+ */
+class KakaoMessageEvent internal constructor(
+    room: KakaoRoom,
+    logId: String,
+    actor: KakaoUser?,
+    createdAt: Long,
+    /** The message, with its sender (`event.message.sender`) and text (`event.message.text`). */
+    val message: KakaoMessage,
+) : KakaoRoomEvent(room, logId, actor, createdAt) {
+    override fun toString(): String =
+        "KakaoMessageEvent(room=${room.name}, sender=${message.sender.name}, type=${message.type}, text=${message.text})"
 }
 
 /** A message was deleted for everyone ("모든 사람에게서 삭제"). */

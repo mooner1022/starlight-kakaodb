@@ -4,8 +4,8 @@ import dev.mooner.kakaodb.script.KakaoFeedEvent
 import dev.mooner.kakaodb.script.KakaoMemberJoinedEvent
 import dev.mooner.kakaodb.script.KakaoMemberLeftEvent
 import dev.mooner.kakaodb.script.KakaoMemberRoleChangedEvent
-import dev.mooner.kakaodb.script.KakaoMessage
 import dev.mooner.kakaodb.script.KakaoMessageDeletedEvent
+import dev.mooner.kakaodb.script.KakaoMessageEvent
 import dev.mooner.kakaodb.script.KakaoMessageHiddenEvent
 import dev.mooner.kakaodb.utils.tr
 import dev.mooner.starlight.plugincore.chat.DeletedMessage
@@ -18,12 +18,18 @@ import kotlin.reflect.KClass
  * Project events. Their ids are kakaodb.<category>.<id>, with the categories set in KakaoDBPlugin.
  * The short ids are unique across categories: ProjectEvent compares events by them.
  *
- * StarLight AI (StarLight 1.1.0) describes each event from its KDoc, whose @param names the script's argument (argName),
+ * StarLight AI (StarLight 1.1.0) describes each event from its KDoc, whose @param names the script's argument (event),
  * and from description, usage and functionName. Each takes one argument and dispatch isn't overridden, so what the
  * script receives is argTypes: scriptArguments and listenerName keep their defaults.
  */
 
-/** A KakaoDB event: the database row that caused it reaches the script's function as one argument, [argName]. */
+/**
+ * The name of every KakaoDB event function's argument, as StarLight's own events name theirs: the starting code uses it,
+ * and each event's KDoc names it with @param.
+ */
+private const val ARG_NAME = "event"
+
+/** A KakaoDB event: the database row that caused it reaches the script's function as one argument, `event`. */
 abstract class KakaoProjectEvent(
     override val id: String,
     override val functionName: String,
@@ -35,8 +41,6 @@ abstract class KakaoProjectEvent(
     argType: KClass<*>,
     commentEnglish: String,
     commentKorean: String,
-    /** The name of the script function's argument, which the starting code uses and the KDoc's @param names. */
-    argName: String = "event",
 ) : ProjectEvent() {
 
     override val name: String = tr(english, korean)
@@ -47,20 +51,21 @@ abstract class KakaoProjectEvent(
     override val functionComment: String = tr(commentEnglish, commentKorean)
 
     override val argTypes: Array<CodeGenerator.Argument<*>> =
-        arrayOf(argName typedAs argType)
+        arrayOf(ARG_NAME typedAs argType)
 }
 
 // ---------------------------------------------------------------- message
 
 /**
- * A message was stored in KakaoTalk's database; calls the script's `onKakaoMessage(msg)`.
+ * A message was stored in KakaoTalk's database; calls the script's `onKakaoMessage(event)`.
  *
  * Called once per message stored after the plugin connected, notifications or not: rooms with notifications off, and
  * the room open on screen, call it too. Feeds (joins, deletions...) don't; they have events of their own. The user's own
  * messages, the bot's replies among them, call it only when the plugin setting **내 메시지 무시** (Ignore my messages)
  * is off.
  *
- * @param msg The message, with its room and sender; `msg.reply(text)` answers in its room.
+ * @param event The new message: `event.message` is the message with its text and sender, and `event.room.send(text)`
+ *   answers in its room, as in the other KakaoDB events.
  * @see guide:events
  * @see guide:sending
  */
@@ -71,10 +76,9 @@ class KakaoMessageCreateEvent : KakaoProjectEvent(
     korean = "카카오톡 메시지 (DB)",
     descriptionEnglish = "When a message is stored in KakaoTalk's database",
     descriptionKorean = "카카오톡 데이터베이스에 메시지가 저장될 때",
-    argType = KakaoMessage::class,
+    argType = KakaoMessageEvent::class,
     commentEnglish = "Called when a message is stored in KakaoTalk's database.",
     commentKorean = "카카오톡 데이터베이스에 메시지가 저장되면 호출됩니다.",
-    argName = "msg",
 )
 
 /**

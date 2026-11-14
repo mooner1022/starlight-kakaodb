@@ -5,12 +5,12 @@ summary: Working with KakaoDB's objects in scripts: string IDs, Java lists, time
 
 ## Reaching KakaoDB
 
-- Event functions get the event's object: a `KakaoMessage` for `onKakaoMessage(msg)`, an event object with `room` and
-  `actor` for the others (guide:events).
-- `KakaoDB` is a global in every project. Every event object also has it as `db` (`msg.db`, `event.db`): the same
-  object.
-- `msg.room` and `event.room` are `KakaoRoom`s, which send and query too: `room.send(text)`,
-  `room.getMessages(20)`.
+- Every `onKakao...` function gets one event object, `event`, with `room` and `actor` (guide:events). In
+  `onKakaoMessage(event)`, `event.message` is the new message, a `KakaoMessage`; below, `msg` stands for a
+  `KakaoMessage`, such as `const msg = event.message`.
+- `KakaoDB` is a global in every project. Every `onKakao...` event object also has it as `event.db`: the same object.
+- `event.room` and `msg.room` are `KakaoRoom`s, which send and query too: `event.room.send(text)`,
+  `room.getMessages(20)`. A `KakaoMessage` itself doesn't send: send through its room.
 
 ## Values
 
@@ -52,20 +52,21 @@ what a message answers, check both:
 const target = msg.replyTo != null ? msg.replyTo.id : msg.threadId;   // null: answers nothing
 ```
 
-`msg.reply(text)` sends to the room, not into the thread.
+`event.room.send(text)` sends to the room, not into the thread.
 
 ## Examples
 
 NeonJS:
 
 ```js
-export function onKakaoMessage(msg) {
+export function onKakaoMessage(event) {
+    const msg = event.message;
     if (msg.text === "!rooms") {
-        const names = Array.from(msg.db.getRooms()).slice(0, 10).map((room) => room.name);
-        msg.reply(names.join("\n"));
+        const names = Array.from(event.db.getRooms()).slice(0, 10).map((room) => room.name);
+        event.room.send(names.join("\n"));
     }
     if (msg.text === "!unread")
-        msg.reply(`${msg.getUnreadCount()} haven't read this`);
+        event.room.send(`${msg.getUnreadCount()} haven't read this`);
 }
 
 export function onKakaoMemberJoined(event) {
@@ -82,11 +83,12 @@ function onKakaoMessageDeleted(event) {
         event.room.send(event.message.sender.name + " deleted: " + event.message.text);
 }
 
-function onKakaoMessage(msg) {
+function onKakaoMessage(event) {
+    var msg = event.message;
     if (msg.isThreadMessage) {
         var root = msg.getThreadRoot();
         if (root != null && root.isMine)
-            msg.reply("A thread answer to my message: " + msg.text);
+            event.room.send("A thread answer to my message: " + msg.text);
     }
 }
 ```

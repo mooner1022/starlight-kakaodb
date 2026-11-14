@@ -44,6 +44,7 @@ import dev.mooner.kakaodb.script.KakaoMemberLeftEvent
 import dev.mooner.kakaodb.script.KakaoMemberRoleChangedEvent
 import dev.mooner.kakaodb.script.KakaoMessage
 import dev.mooner.kakaodb.script.KakaoMessageDeletedEvent
+import dev.mooner.kakaodb.script.KakaoMessageEvent
 import dev.mooner.kakaodb.script.KakaoMessageHiddenEvent
 import dev.mooner.kakaodb.script.ScriptMapper
 import dev.mooner.kakaodb.send.SendQueue
@@ -571,10 +572,10 @@ class KakaoDBPlugin : StarlightPlugin() {
             LOG.info { obj.toString() }
 
         when (obj) {
-            is KakaoMessage                 -> {
+            is KakaoMessageEvent            -> {
                 fire<KakaoMessageCreateEvent>(obj)
                 if (settings.compatMessage)
-                    fire<KakaoCompatMessageEvent>(compatMessage(obj))
+                    fire<KakaoCompatMessageEvent>(compatMessage(obj.message))
             }
             is KakaoMessageDeletedEvent     -> {
                 fire<KakaoMessageDeleteEvent>(obj)

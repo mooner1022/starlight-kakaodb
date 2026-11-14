@@ -6,9 +6,15 @@ summary: KakaoDB's events, what calls each one and what doesn't, how they compar
 KakaoDB fires an event for each row KakaoTalk stores in its database while the plugin is connected (guide:setup).
 `describe_event` shows each one's argument.
 
+Every `onKakao...` function gets one event object, `event`, with the same base: the room it happened in
+(`event.room`, which sends with `event.room.send(text)`), who caused it (`event.actor`), when (`event.createdAt`) and
+the client (`event.db`). `onKakaoMessage` gets the message as `event.message`, and its sender as `event.actor`. The
+compatibility events `onMessage` and `onMessageDeleted` get StarLight's own objects instead (below); they have
+`event.room` too, but not the rest.
+
 | Function | Event ID | Called when |
 |---|---|---|
-| `onKakaoMessage(msg)` | `kakaodb.message.create` | A message is stored: text, photos, replies, emoticons... |
+| `onKakaoMessage(event)` | `kakaodb.message.create` | A message is stored: text, photos, replies, emoticons... |
 | `onKakaoMessageDeleted(event)` | `kakaodb.message.delete` | A message is deleted for everyone. |
 | `onKakaoMessageHidden(event)` | `kakaodb.message.hide` | An open chat's host or a manager hides messages. |
 | `onKakaoMemberJoined(event)` | `kakaodb.member.join` | Members are invited, or join an open chat through its link. |
@@ -22,8 +28,8 @@ KakaoDB fires an event for each row KakaoTalk stores in its database while the p
   (guide:starlight:projects#allowed-events). In NeonJS, the function must be exported.
 - Events come while the plugin is connected and StarLight's **전역 전원** (global power) is on.
 - The user's own messages, the bot's replies among them, don't call `onKakaoMessage` while **내 메시지 무시** (ignore
-  my messages) is on, as it is by default. That keeps a bot from answering itself. Check `msg.isMine` when the user
-  turned it off.
+  my messages) is on, as it is by default. That keeps a bot from answering itself. Check `event.message.isMine` when
+  the user turned it off.
 - Feeds, such as joins and deletions, don't call `onKakaoMessage`. `onKakaoFeed` gets every feed, so a project that
   receives it and, say, `onKakaoMemberJoined` gets each join twice: once as a feed.
 
