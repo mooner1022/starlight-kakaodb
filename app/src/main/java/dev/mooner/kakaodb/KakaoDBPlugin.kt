@@ -289,12 +289,17 @@ class KakaoDBPlugin : StarlightPlugin() {
     }
 
     private suspend fun openConnection(scope: CoroutineScope, connection: ConnectionSettings) {
-        val dir = File(connection.path)
         val access = DatabaseAccess.of(connection.accessMode, getAsset(RootAccess.HELPER_ASSET))
-        val warnings = when (val result = access.prepare(dir)) {
+        val ready = when (val result = access.prepare(File(connection.path))) {
             is AccessResult.Failed -> return fail(result.reason, result.retryable)
-            is AccessResult.Ready  -> result.warnings.toMutableList()
+            is AccessResult.Ready  -> result
         }
+        // The folder the files are really in: the setting, or the account folder in it (KakaoTalk 26.10+). Found again
+        // on every connection, so signing in with another account needs nothing more than a reconnect.
+        val dir = ready.dir
+        val warnings = ready.warnings.toMutableList()
+        for (note in ready.notes)
+            LOG.info { note }
 
         val options = DecoderOptions(baseDBPath = dir.path, selfId = connection.selfId, selfName = connection.selfName)
         val decoder = DatabaseDecoder(options, access.sessionFactory, PluginLogger { settings.verboseLogging })
@@ -481,8 +486,8 @@ class KakaoDBPlugin : StarlightPlugin() {
                     databasePath(
                         connection.path, color { COLOR_ICON },
                         tr(
-                            "The folder holding KakaoTalk.db and KakaoTalk2.db. Change it only if KakaoTalk's data is somewhere else, such as a second user or a cloned app.",
-                            "KakaoTalk.db와 KakaoTalk2.db가 있는 폴더입니다. 보조 사용자나 앱 복제본처럼 카카오톡 데이터가 다른 곳에 있을 때만 바꾸세요.",
+                            "The folder holding KakaoTalk.db and KakaoTalk2.db. KakaoTalk 26.10 and later keep them in an account folder inside it, which is found by itself. Change it only if KakaoTalk's data is somewhere else, such as a second user or a cloned app.",
+                            "KakaoTalk.db와 KakaoTalk2.db가 있는 폴더입니다. 카카오톡 26.10부터는 이 안의 계정 폴더에 두는데, 그 폴더는 알아서 찾아요. 보조 사용자나 앱 복제본처럼 카카오톡 데이터가 다른 곳에 있을 때만 바꾸세요.",
                         ),
                     )
                 }
@@ -750,7 +755,10 @@ class KakaoDBPlugin : StarlightPlugin() {
                 )
                 databasePath(
                     DEFAULT_DB_PATH, color { COLOR_ICON },
-                    tr("Change it only if KakaoTalk's data is somewhere else.", "카카오톡 데이터가 다른 곳에 있을 때만 바꾸세요."),
+                    tr(
+                        "Account folders in it (KakaoTalk 26.10+) are found by themselves. Change it only if KakaoTalk's data is somewhere else.",
+                        "안의 계정 폴더(카카오톡 26.10+)는 알아서 찾아요. 카카오톡 데이터가 다른 곳에 있을 때만 바꾸세요.",
+                    ),
                 )
                 spinner {
                     id = CONF_POLL_INTERVAL

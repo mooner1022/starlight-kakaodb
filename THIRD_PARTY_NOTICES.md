@@ -15,7 +15,8 @@ see `vendor/HayulGUI/NOTICE`.
 `rootd/src/main/java/dev/mooner/kakaodb/rootd/CryptoUserDatabase.java` ports code from
 [Iris](https://github.com/dolidolih/Iris) (`UserDbSaltStore.kt`, `CryptoUserDatabaseReader.kt`, `SqlCipherNative.kt`):
 reading the `crypto_user_database` passphrase seed, deriving the passphrase, and loading `libsqlcipher.so` from the
-running APK.
+running APK. `rootd/src/protocol/java/dev/mooner/kakaodb/rootd/KakaoLayout.java` takes the seed file paths of
+KakaoTalk versions before 26.10 from `UserDbSaltStore.kt`.
 
 ```
 MIT License

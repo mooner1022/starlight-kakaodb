@@ -2,6 +2,7 @@ package dev.mooner.kakaodb.db
 
 import dev.mooner.kakaodb.core.DecoderOptions
 import dev.mooner.kakaodb.core.sqlite.SessionFactory
+import dev.mooner.kakaodb.rootd.KakaoLayout
 import dev.mooner.kakaodb.rootd.Protocol
 import dev.mooner.kakaodb.rootd.WalFiles
 import dev.mooner.kakaodb.utils.tr
@@ -19,7 +20,11 @@ interface DatabaseAccess {
 
     val mode: AccessMode
 
-    /** Gets the database files in [dir] ready to be opened with [sessionFactory], or tells why they can't be. */
+    /**
+     * Gets the database files in [dir] ready to be opened with [sessionFactory], or tells why they can't be. When [dir]
+     * has no KakaoTalk.db, the most recently used account folder in it that has one is taken (KakaoTalk 26.10 moved
+     * the databases there, see [KakaoLayout]): [AccessResult.Ready.dir] says which folder to read.
+     */
     fun prepare(dir: File): AccessResult
 
     /** Opens the sessions the decoder reads through. */
@@ -59,10 +64,37 @@ internal fun walFilesMissing(name: String, missing: String): String =
         "$name 의 $missing 파일이 없어요. 지금 열면 카카오톡 대신 이 파일을 만들게 돼요. 카카오톡을 한 번 실행한 뒤 다시 연결하세요.",
     )
 
+/**
+ * What the log says when the databases were found in an account folder of [dir]: [accounts], the one used first.
+ * Several are there when KakaoTalk was signed in with another account before.
+ */
+internal fun accountFolderNotes(dir: File, accounts: List<File>): List<String> {
+    val used = accounts.first()
+    val notes = mutableListOf(
+        tr(
+            "This KakaoTalk keeps its databases in an account folder: reading ${used.path}",
+            "이 카카오톡은 데이터베이스를 계정 폴더에 둬요. ${used.path}을 읽어요.",
+        )
+    )
+    if (accounts.size > 1)
+        notes += tr(
+            "${dir.path} has ${accounts.size} account folders (${accounts.joinToString { it.name }}): the most recently used one is read. To read another, set the database folder to it.",
+            "${dir.path}에 계정 폴더가 ${accounts.size}개 있어요 (${accounts.joinToString { it.name }}). 가장 최근에 쓰인 폴더를 읽어요. 다른 폴더를 읽으려면 데이터베이스 폴더를 그 폴더로 지정하세요.",
+        )
+    return notes
+}
+
 sealed class AccessResult {
 
-    /** The files can be read. [warnings] are things that may still make the connection fail. */
-    data class Ready(val warnings: List<String> = emptyList()) : AccessResult()
+    /**
+     * The files can be read, in [dir]: the folder asked for, or the account folder in it that has them. [warnings] are
+     * things that may still make the connection fail; [notes] tell how [dir] was found.
+     */
+    data class Ready(
+        val dir: File,
+        val warnings: List<String> = emptyList(),
+        val notes: List<String> = emptyList(),
+    ) : AccessResult()
 
     /**
      * The files can't be read, for [reason]. [retryable]: it may pass by itself (KakaoTalk hasn't opened its database
@@ -72,6 +104,9 @@ sealed class AccessResult {
     data class Failed(val reason: String, val retryable: Boolean = true) : AccessResult()
 }
 
+private fun AccessResult.withNotes(notes: List<String>): AccessResult =
+    if (this is AccessResult.Ready) copy(notes = this.notes + notes) else this
+
 /** Reads the files as they are; only checks that this process can. */
 object DirectAccess : DatabaseAccess {
 
@@ -79,8 +114,15 @@ object DirectAccess : DatabaseAccess {
 
     override val sessionFactory: SessionFactory = AndroidSqliteSession.factory
 
-    override fun prepare(dir: File): AccessResult =
-        checkReadable(dir)
+    /** Account folders are only found when this process can list [dir]. */
+    override fun prepare(dir: File): AccessResult {
+        if (!File(dir, DecoderOptions.MAIN_DB).exists()) {
+            val accounts = KakaoLayout.accountDirs(dir)
+            if (accounts.isNotEmpty())
+                return checkReadable(accounts.first()).withNotes(accountFolderNotes(dir, accounts))
+        }
+        return checkReadable(dir)
+    }
 
     override fun fileChanges(dir: File): Flow<Unit> =
         DatabaseWatcher.localChanges(dir)
@@ -113,7 +155,7 @@ object DirectAccess : DatabaseAccess {
             if (!dir.canRead())
                 add(tr("Can't list ${dir.path}: changes are found by polling only", "${dir.path} 목록을 읽을 수 없어 주기적 확인으로만 변경을 감지해요"))
         }
-        return AccessResult.Ready(warnings)
+        return AccessResult.Ready(dir, warnings)
     }
 }
 
@@ -136,40 +178,18 @@ class RootAccess(helperApk: File) : DatabaseAccess {
     override val sessionFactory: SessionFactory = RootSqliteSession.factory(apk)
 
     /** Starts the helper (su may prompt the first time) and has it check the files. */
-    override fun prepare(dir: File): AccessResult {
-        val masks = try {
+    override fun prepare(dir: File): AccessResult =
+        try {
             RootHelper.connect(apk, RootHelper.SESSION_TIMEOUT_MILLIS).use { channel ->
-                channel.send(Protocol.OP_CHECK) {
-                    writeString(dir.path)
-                    writeNames(DB_FILES)
-                }
-                channel.expectOk()
-                if (!channel.input.readBoolean())
-                    return AccessResult.Failed(tr("${dir.path} doesn't exist", "${dir.path} 폴더가 없어요"))
-                DB_FILES.associateWith { channel.input.readUnsignedByte() }
+                channel.prepareDatabases(dir) { file -> tr("${file.path} doesn't exist", "${file.path} 파일이 없어요") }
             }
         } catch (e: RootException) {
-            return AccessResult.Failed(e.message ?: e.toString(), retryable = e.retryable)
+            AccessResult.Failed(e.message ?: e.toString(), retryable = e.retryable)
         } catch (e: IOException) {
-            return AccessResult.Failed(
+            AccessResult.Failed(
                 tr("The root helper stopped answering: ${e.message}", "루트 도우미가 응답하지 않아요: ${e.message}")
             )
         }
-
-        for ((name, mask) in masks) {
-            if ((mask and Protocol.FILE_EXISTS) == 0)
-                return AccessResult.Failed(tr("${File(dir, name).path} doesn't exist", "${File(dir, name).path} 파일이 없어요"))
-            // The helper would have to create them, as root and with its own SELinux label: it refuses to.
-            if ((mask and Protocol.FILE_UNSAFE) != 0) {
-                val missing = listOfNotNull(
-                    "-wal".takeIf { (mask and Protocol.FILE_WAL) == 0 },
-                    "-shm".takeIf { (mask and Protocol.FILE_SHM) == 0 },
-                ).joinToString(", ")
-                return AccessResult.Failed(walFilesMissing(name, missing))
-            }
-        }
-        return AccessResult.Ready()
-    }
 
     override fun fileChanges(dir: File): Flow<Unit> =
         RootHelper.changes(apk, dir, DatabaseWatcher.WATCHED_FILES)
@@ -177,7 +197,69 @@ class RootAccess(helperApk: File) : DatabaseAccess {
     companion object {
         /** The plugin asset holding the helper; pass StarlightPlugin.getAsset(HELPER_ASSET) to [DatabaseAccess.of]. */
         const val HELPER_ASSET = HelperApk.ASSET
-
-        private val DB_FILES = listOf(DecoderOptions.MAIN_DB, DecoderOptions.SUB_DB)
     }
+}
+
+private val DB_FILES = listOf(DecoderOptions.MAIN_DB, DecoderOptions.SUB_DB)
+
+/** The most account folders a helper's answer is taken to list; more means the stream is out of step. */
+private const val MAX_ACCOUNT_DIRS = 1_000
+
+/**
+ * Has the helper on this channel (root or shared UID) check the databases in [dir], or, when [dir] has no KakaoTalk.db,
+ * in its most recently used account folder (KakaoTalk 26.10+). [missing] says that a file isn't there. Throws an
+ * [IOException] when the helper fails or goes away.
+ */
+internal fun RootChannel.prepareDatabases(dir: File, missing: (File) -> String): AccessResult {
+    val masks = checkFiles(dir)
+        ?: return AccessResult.Failed(tr("${dir.path} doesn't exist", "${dir.path} 폴더가 없어요"))
+    // Only then: a helper from before account folders doesn't know the op, and ends the connection on it.
+    if ((masks.getValue(DecoderOptions.MAIN_DB) and Protocol.FILE_EXISTS) == 0) {
+        val accounts = findAccounts(dir)
+        if (accounts.isNotEmpty()) {
+            val account = accounts.first()
+            val accountMasks = checkFiles(account)
+                ?: return AccessResult.Failed(tr("${account.path} doesn't exist", "${account.path} 폴더가 없어요"))
+            return checkMasks(account, accountMasks, missing).withNotes(accountFolderNotes(dir, accounts))
+        }
+    }
+    return checkMasks(dir, masks, missing)
+}
+
+/** The helper's [Protocol.FILE_EXISTS]... mask of each of [DB_FILES] in [dir]; null when [dir] doesn't exist. */
+private fun RootChannel.checkFiles(dir: File): Map<String, Int>? {
+    send(Protocol.OP_CHECK) {
+        writeString(dir.path)
+        writeNames(DB_FILES)
+    }
+    expectOk()
+    val exists = input.readBoolean()
+    val masks = DB_FILES.associateWith { input.readUnsignedByte() }
+    return masks.takeIf { exists }
+}
+
+/** See [Protocol.OP_FIND_ACCOUNTS]. */
+private fun RootChannel.findAccounts(dir: File): List<File> {
+    send(Protocol.OP_FIND_ACCOUNTS) { writeString(dir.path) }
+    expectOk()
+    val count = input.readInt()
+    if (count !in 0..MAX_ACCOUNT_DIRS)
+        throw IOException("Bad account folder count from the helper: $count")
+    return List(count) { File(Protocol.readString(input)) }
+}
+
+private fun checkMasks(dir: File, masks: Map<String, Int>, missing: (File) -> String): AccessResult {
+    for ((name, mask) in masks) {
+        if ((mask and Protocol.FILE_EXISTS) == 0)
+            return AccessResult.Failed(missing(File(dir, name)))
+        // The helper would have to create them, as root (or KakaoTalk's UID) and with its own SELinux label: it refuses to.
+        if ((mask and Protocol.FILE_UNSAFE) != 0) {
+            val absent = listOfNotNull(
+                "-wal".takeIf { (mask and Protocol.FILE_WAL) == 0 },
+                "-shm".takeIf { (mask and Protocol.FILE_SHM) == 0 },
+            ).joinToString(", ")
+            return AccessResult.Failed(walFilesMissing(name, absent))
+        }
+    }
+    return AccessResult.Ready(dir)
 }

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.os.Process;
 import android.text.format.DateUtils;
 
+import dev.mooner.kakaodb.rootd.KakaoLayout;
 import dev.mooner.kakaodb.rootd.Protocol;
 import dev.mooner.kakaodb.rootd.WalFiles;
 
@@ -19,7 +20,7 @@ final class HelperChecks {
 
     private HelperChecks() {}
 
-    private static final String MAIN_DB = "KakaoTalk.db";
+    private static final String MAIN_DB = KakaoLayout.MAIN_DB;
     private static final String SUB_DB = "KakaoTalk2.db";
     private static final String USER_DB = "crypto_user_database";
 
@@ -55,9 +56,9 @@ final class HelperChecks {
         }
     }
 
-    /** KakaoTalk's database directory, which the service limits sessions to. */
+    /** KakaoTalk's database directory, which the service limits sessions to (with the account folders in it). */
     static File databaseDir(Context context) throws PackageManager.NameNotFoundException {
-        return new File(context.getPackageManager().getApplicationInfo(Protocol.KAKAO_PACKAGE, 0).dataDir, "databases");
+        return new File(context.getPackageManager().getApplicationInfo(Protocol.KAKAO_PACKAGE, 0).dataDir, KakaoLayout.DATABASES);
     }
 
     static Report run(Context context) {
@@ -70,9 +71,10 @@ final class HelperChecks {
         setup.add(kakaoTalk(context, kakao, sameUid));
         setup.add(starLight(context, packageInfo(packages, Protocol.STARLIGHT_PACKAGE)));
         if (sameUid) {
-            File dir = new File(kakao.applicationInfo.dataDir, "databases");
-            setup.add(databases(context, dir));
-            setup.add(friendList(context, dir));
+            File dir = new File(kakao.applicationInfo.dataDir, KakaoLayout.DATABASES);
+            File dbDir = databaseFolder(dir);
+            setup.add(databases(context, dir, dbDir));
+            setup.add(friendList(context, dbDir));
         }
 
         List<Check> connection = connection(context);
@@ -128,19 +130,32 @@ final class HelperChecks {
         return new Check(State.OK, title, context.getString(R.string.check_version, String.valueOf(starLight.versionName)));
     }
 
-    private static Check databases(Context context, File dir) {
+    /**
+     * Where the plugin finds the databases in [dir], as it does: there, or in KakaoTalk 26.10's most recently used
+     * account folder. [dir] itself when neither has them.
+     */
+    private static File databaseFolder(File dir) {
+        if (new File(dir, MAIN_DB).isFile())
+            return dir;
+        List<File> accounts = KakaoLayout.accountDirs(dir);
+        return accounts.isEmpty() ? dir : accounts.get(0);
+    }
+
+    private static Check databases(Context context, File dir, File dbDir) {
         String title = context.getString(R.string.check_databases);
         if (!dir.isDirectory())
             return new Check(State.ERROR, title, context.getString(R.string.check_databases_no_dir));
         for (String name : new String[] { MAIN_DB, SUB_DB }) {
-            File db = new File(dir, name);
+            File db = new File(dbDir, name);
             if (!db.isFile())
                 return new Check(State.ERROR, title, context.getString(R.string.check_databases_missing, name));
             String missing = WalFiles.missing(db);
             if (missing != null)
                 return new Check(State.WARN, title, context.getString(R.string.check_databases_unsafe, name, missing));
         }
-        return new Check(State.OK, title, MAIN_DB + ", " + SUB_DB);
+        // An account folder (KakaoTalk 26.10+) shows in front.
+        String folder = dbDir.equals(dir) ? "" : dbDir.getName() + "/";
+        return new Check(State.OK, title, folder + MAIN_DB + ", " + SUB_DB);
     }
 
     private static Check friendList(Context context, File dir) {

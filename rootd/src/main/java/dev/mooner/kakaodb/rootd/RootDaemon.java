@@ -26,6 +26,7 @@ import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -222,7 +223,7 @@ public final class RootDaemon {
         new Connection(in, out, null).run();
     }
 
-    /** Restricts an installed helper to one canonical database directory. */
+    /** Restricts an installed helper to one canonical database directory and the account folders directly in it. */
     public static void serveAuthenticated(DataInputStream in, DataOutputStream out, File directory) throws IOException {
         new Connection(in, out, directory.getCanonicalFile()).run();
     }
@@ -405,9 +406,10 @@ public final class RootDaemon {
             this.allowedDir = allowedDir;
         }
 
+        /** [dir], links resolved. A restricted helper takes its directory and the account folders in it (KakaoTalk 26.10+). */
         private File checkedDir(File dir) throws IOException {
             File canonical = dir.getCanonicalFile();
-            if (allowedDir != null && !allowedDir.equals(canonical))
+            if (allowedDir != null && !allowedDir.equals(canonical) && !allowedDir.equals(canonical.getParentFile()))
                 throw new SecurityException("Database directory is not permitted: " + dir);
             return canonical;
         }
@@ -430,6 +432,9 @@ public final class RootDaemon {
                     switch (op) {
                         case Protocol.OP_CHECK:
                             check();
+                            break;
+                        case Protocol.OP_FIND_ACCOUNTS:
+                            findAccounts();
                             break;
                         case Protocol.OP_OPEN:
                             open(Protocol.readString(in));
@@ -498,6 +503,22 @@ public final class RootDaemon {
                     mask |= Protocol.FILE_SHM;
                 out.writeByte(mask);
             }
+        }
+
+        /** KakaoTalk 26.10's account folders in a database directory: only those, whatever else is in it. */
+        private void findAccounts() throws IOException {
+            File dir = new File(Protocol.readString(in));
+            List<File> accounts;
+            try {
+                accounts = KakaoLayout.accountDirs(checkedDir(dir));
+            } catch (RuntimeException | IOException e) {
+                fail(e);
+                return;
+            }
+            out.writeByte(Protocol.STATUS_OK);
+            out.writeInt(accounts.size());
+            for (File account : accounts)
+                Protocol.writeString(out, account.getPath());
         }
 
         private void open(String path) throws IOException {

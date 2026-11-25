@@ -23,7 +23,8 @@ import java.io.IOException;
 /**
  * Serves KakaoTalk's databases to StarLight. Installed patched into KakaoTalk's shared UID (by the setup tool), it can
  * open them where they are; the plugin binds it and makes the one transaction described in {@link Protocol}, which
- * hands out a socket speaking RootDaemon's protocol, limited to KakaoTalk's database directory.
+ * hands out a socket speaking RootDaemon's protocol, limited to KakaoTalk's database directory and the account folders
+ * in it (KakaoTalk 26.10+).
  *
  * <p>Only StarLight's UID is served, and only while this helper really runs as KakaoTalk's UID. Every StarLight plugin
  * shares that UID, so this can't tell this plugin apart from the others.

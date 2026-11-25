@@ -12,15 +12,18 @@ import java.nio.charset.StandardCharsets;
  * <p>Every request is an op byte followed by its arguments. Replies start with {@link #STATUS_OK} or
  * {@link #STATUS_ERROR} followed by a message. A connection is either a session (OPEN and ATTACH, or OPEN_USER_DB,
  * then QUERY... until it is closed, the database closing with it) or a watch (WATCH, then {@link #EVENT_CHANGED} bytes
- * until it is closed).
+ * until it is closed). CHECK and FIND_ACCOUNTS may come first on either.
  */
 public final class Protocol {
 
     private Protocol() {}
 
     /**
-     * Bumped on any change to the format below, or to the shared helper's binder reply.
+     * Bumped on any change to the format below, or to the shared helper's binder reply, except a new op: a helper that
+     * doesn't know an op ends the connection, and the plugin tells the user to update it. A bump makes every installed
+     * shared helper refuse the plugin until it is patched again, which an op only some setups need isn't worth.
      * 4: the shared helper's reply carries its build ({@link #SHARED_DESCRIPTOR}).
+     * Ops added to 4 since: {@link #OP_FIND_ACCOUNTS}.
      */
     public static final int VERSION = 4;
 
@@ -50,8 +53,8 @@ public final class Protocol {
     public static final int OP_HELLO = 1;
     /*
      * The helper runs as root, so it only serves what the plugin needs: files named like KakaoTalk's databases
-     * (KakaoTalk.db, KakaoTalk2.db, crypto_user_database, and their -wal for watches), and SELECT or
-     * PRAGMA data_version/table_info statements.
+     * (KakaoTalk.db, KakaoTalk2.db, crypto_user_database, and their -wal for watches), SELECT or
+     * PRAGMA data_version/table_info statements, and which folders hold a KakaoTalk.db.
      */
 
     /** dir, names -> OK, dir exists, one FILE_* mask per name */
@@ -66,6 +69,11 @@ public final class Protocol {
     public static final int OP_WATCH = 6;
     /** database dir -> OK; opens crypto_user_database there (SQLCipher) as this session's database */
     public static final int OP_OPEN_USER_DB = 7;
+    /**
+     * dir -> OK, count, paths: the folders directly in dir that hold KakaoTalk.db, the most recently written first
+     * (KakaoTalk 26.10's account folders, see {@link KakaoLayout}). Nothing else about dir is told.
+     */
+    public static final int OP_FIND_ACCOUNTS = 8;
 
     public static final int STATUS_OK = 0;
     public static final int STATUS_ERROR = 1;

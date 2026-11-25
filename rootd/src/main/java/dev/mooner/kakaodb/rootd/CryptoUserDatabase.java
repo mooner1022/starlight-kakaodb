@@ -37,7 +37,8 @@ import javax.crypto.spec.PBEKeySpec;
  * the values inside are plain.
  *
  * <p>Its passphrase isn't stored anywhere: KakaoTalk derives it from a seed kept in its DataStore preferences
- * ({@value #SEED_KEY} in {@value #SEED_FILE}):
+ * ({@value #SEED_KEY}; in files/datastore/&lt;account&gt;/Features.preferences_pb since KakaoTalk 26.10,
+ * Feature_DataStore.pref.preferences_pb before, see {@link KakaoLayout#seedFiles}):
  * <pre>
  *   salt       = UTF-8 of "se" + seed + "ed", zero-padded or cut to 16 bytes
  *   passphrase = PBKDF2WithHmacSHA256(PASSWORD, salt, 4096 iterations, 256 bits)
@@ -51,12 +52,6 @@ final class CryptoUserDatabase implements RootDaemon.Database {
     static final String DB_NAME = "crypto_user_database";
 
     private static final String SEED_KEY = "userDbPassPhraseSalt";
-    private static final String SEED_FILE = "Feature_DataStore.pref.preferences_pb";
-
-    /** Where KakaoTalk versions put the DataStore file, relative to KakaoTalk's data directory. */
-    private static final String[] SEED_PATHS = {
-        "files/datastore/" + SEED_FILE, "files/" + SEED_FILE, "datastore/" + SEED_FILE,
-    };
 
     private static final char[] PASSWORD = { 4, 15, 81, 123, 77, 5, 23, 99, 2, 111, 10, 31, 54, 29, 109, 97 };
     private static final int ITERATIONS = 4096;
@@ -80,14 +75,18 @@ final class CryptoUserDatabase implements RootDaemon.Database {
         this.db = db;
     }
 
-    /** Opens {@code dbDir}/crypto_user_database; KakaoTalk's data directory is {@code dbDir}'s parent. */
+    /**
+     * Opens {@code dbDir}/crypto_user_database. {@code dbDir} is KakaoTalk's databases folder, or an account folder in
+     * it: the seed is looked for in KakaoTalk's data directory, and the account's DataStore folder (see
+     * {@link KakaoLayout}).
+     */
     static CryptoUserDatabase open(File dbDir) throws IOException, GeneralSecurityException {
         File file = new File(dbDir, DB_NAME);
         if (!file.isFile())
             throw new FileNotFoundException(file.getPath() + " doesn't exist");
         RootDaemon.requireSafe(file);
         // Not cleared after use: SQLCipher may keep the array to open more connections.
-        byte[] passphrase = deriveKey(readSeed(dbDir.getAbsoluteFile().getParentFile()));
+        byte[] passphrase = deriveKey(readSeed(dbDir));
         loadNativeLibrary();
 
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
@@ -136,18 +135,27 @@ final class CryptoUserDatabase implements RootDaemon.Database {
         }
     }
 
-    private static long readSeed(File appDir) throws IOException {
-        for (String path : SEED_PATHS) {
-            File file = new File(appDir, path);
-            if (!file.isFile())
+    /**
+     * The seed for the databases in {@code dbDir}, from the first of {@link KakaoLayout#seedFiles} that has it. A file
+     * that isn't a DataStore PreferenceMap (the search also looks into the other DataStore files) is passed over.
+     */
+    private static long readSeed(File dbDir) throws IOException {
+        for (File file : KakaoLayout.seedFiles(dbDir)) {
+            Long seed;
+            try {
+                seed = parseSeed(Files.readAllBytes(file.toPath()));
+            } catch (IOException e) {
+                RootDaemon.info("couldn't read " + file.getPath() + ": " + RootDaemon.describe(e));
                 continue;
-            Long seed = parseSeed(Files.readAllBytes(file.toPath()));
-            if (seed != null)
+            }
+            if (seed != null) {
+                RootDaemon.info("found " + SEED_KEY + " in " + file.getPath());
                 return seed;
-            RootDaemon.info(file.getPath() + " has no " + SEED_KEY);
+            }
         }
         throw new FileNotFoundException(
-            "no " + SEED_KEY + " in " + appDir + " (looked in " + String.join(", ", SEED_PATHS) + ")");
+            "no " + SEED_KEY + " in " + KakaoLayout.appDataDir(dbDir) + " (looked in "
+                + String.join(", ", KakaoLayout.knownSeedPaths(dbDir)) + ", and the other DataStore files)");
     }
 
     /**

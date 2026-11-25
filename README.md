@@ -13,7 +13,7 @@
 ## 요구 사항
 
 - StarLight nightly (플러그인 API 1.0.0). StarLight 1.1.0(스냅샷 1000147) 이상에서는 StarLight AI가 이 플러그인의 API·이벤트 설명과 가이드를 읽어요(아래 "StarLight AI 문서").
-- 플러그인이 카카오톡 DB 파일을 **읽을 수 있어야** 합니다. 카카오톡의 비공개 폴더(`/data/data/com.kakao.talk/databases`)에 있는 파일이라 보통은 읽을 수 없습니다.
+- 플러그인이 카카오톡 DB 파일을 **읽을 수 있어야** 합니다. 카카오톡의 비공개 폴더(`/data/data/com.kakao.talk/databases`, 카카오톡 26.10부터는 그 안의 계정 폴더)에 있는 파일이라 보통은 읽을 수 없습니다.
   - **직접 모드**(현재 지원): 파일을 이미 읽을 수 있는 경우입니다. 권한을 직접 설정했거나, SELinux가 꺼진 환경(redroid 등)이거나, 파일을 다른 곳으로 복사해 두고 그 폴더를 지정한 경우가 해당돼요.
     - SQLite는 WAL 모드 DB를 읽기 전용으로 열 때도 `-shm` 파일에 쓰기 권한이 필요해요. 폴더에는 실행(x) 권한이 있어야 하고, 파일 변경을 바로 감지하려면 폴더 읽기(r) 권한도 있어야 해요.
   - **루트 모드**: 루팅된 기기(Android 10 이상)용입니다. su로 루트 도우미를 띄워 카카오톡 DB를 그 자리에서 읽어요. 아래 "루트 모드" 참고.
@@ -63,7 +63,7 @@ kakaodb.setup.keyPassword=...
 | | 연결/연결 끊기, 다시 연결 | |
 | | 자동 연결 | 플러그인이 켜지면 바로 연결합니다. |
 | 데이터베이스 | 접근 방식 | 직접 / 루트 / 공유 UID. 공유 UID의 처음 패치·설치는 초기 설정에서 해요. |
-| | 데이터베이스 폴더 | `KakaoTalk.db`와 `KakaoTalk2.db`가 있는 폴더입니다. 기본값은 `/data/data/com.kakao.talk/databases`예요. |
+| | 데이터베이스 폴더 | `KakaoTalk.db`와 `KakaoTalk2.db`가 있는 폴더입니다. 기본값은 `/data/data/com.kakao.talk/databases`예요. 카카오톡 26.10부터는 DB가 이 안의 계정 폴더(`databases/<16자리 hex>`)에 있는데, 연결할 때마다 알아서 찾아요. 계정 폴더가 여러 개면 가장 최근에 쓰인 폴더를 읽고, 다른 폴더를 읽으려면 그 폴더를 직접 지정하면 돼요. |
 | | 변경 확인 주기 | 파일 변경 감지와 별도로 주기적으로 확인하는 간격입니다(끔/0.5/1/2/5초, 기본 1초). |
 | 이벤트 | 내 메시지 무시 | 기본값은 켜짐이에요. 봇이 보낸 메시지로 다시 이벤트가 발생하는 걸 막아요. |
 | | onMessage 호환 이벤트, onMessageDeleted 호환 이벤트 | 아래 "호환 이벤트" 참고 |
@@ -131,13 +131,15 @@ kakaodb.setup.keyPassword=...
 
 도우미 앱 화면에서 설치된 도우미 빌드를 확인할 수 있어요.
 
+카카오톡 26.10 이상에서는 도우미도 계정 폴더를 아는 빌드여야 해요. 이전 도우미는 이전 카카오톡에서는 그대로 동작하지만, 계정 폴더는 열지 못해서 연결이 실패하고 위 순서대로 도우미를 다시 설치하라고 안내해요.
+
 서명 키는 StarLight의 비공개 플러그인 데이터에 저장됩니다. StarLight를 삭제하거나 플러그인을 데이터와 함께 제거하기 전에 플러그인 설정의 **서명 키 백업**으로 PKCS#12 파일을 저장하세요. 새 설치에서는 처음 패치하기 전에 플러그인 설정의 **서명 키 복원**을 사용합니다. 기존 키가 있는 경우 덮어쓰지 않습니다. 이전 설정 도구의 키도 백업·복원으로 옮길 수 있으니 이전이 끝나기 전에 해당 앱을 삭제하지 마세요. 공유 UID 지원 여부는 Android 버전과 기기 환경에 따라 다를 수 있습니다.
 
 공유 UID 모드는 설치된 도우미 서비스를 바인딩하고, SQL과 파일 변경 알림을 소켓 쌍으로 주고받습니다. `crypto_user_database`도 SQLCipher로 읽습니다. 세션의 읽기는 `poll`로 30초 타임아웃을 걸어, 도우미가 멈추면 연결을 끊고 다시 연결해요.
 
 설정 도구에 포함된 HayulGUI 패치 엔진은 `vendor/HayulGUI`에 있고, 이 저장소에서 고친 부분은 `[kakaodb]` 주석으로 표시했어요. 특히 매니페스트에 새 속성을 넣을 때 리소스 ID 순서를 지키도록 고쳤어요. 원래는 맨 앞에 넣어서 `appComponentFactory`가 없는 APK(도우미)의 `theme`, `label`, `icon`, `allowBackup`이 무시됐어요. 테스트는 `./gradlew :hayulcore:testReleaseUnitTest`로 돌려요.
 
-도우미는 자신과 카카오톡의 UID가 같은지, 호출자가 설치된 StarLight의 UID인지 확인하고 카카오톡의 데이터베이스 디렉터리만 허용합니다. StarLight 내부의 다른 플러그인은 같은 UID로 실행되므로 이 검사로 구분할 수 없습니다. StarLight가 설치된 도우미의 UID도 카카오톡의 UID와 비교합니다.
+도우미는 자신과 카카오톡의 UID가 같은지, 호출자가 설치된 StarLight의 UID인지 확인하고 카카오톡의 데이터베이스 디렉터리와 그 바로 아래 계정 폴더만 허용합니다. StarLight 내부의 다른 플러그인은 같은 UID로 실행되므로 이 검사로 구분할 수 없습니다. StarLight가 설치된 도우미의 UID도 카카오톡의 UID와 비교합니다.
 
 ## 루트 모드
 
@@ -157,7 +159,7 @@ Android 10 이상에서는 다른 앱 데이터에 SELinux MLS 카테고리가 �
 
 최근 카카오톡은 `KakaoTalk2.db`의 `friends` 테이블을 없애고, 친구 목록을 SQLCipher로 암호화된 `crypto_user_database`의 `user` 테이블로 옮겼어요. 그래서 `db2.friends`가 없으면 이 파일에서 친구를 읽어요.
 
-- 암호는 저장돼 있지 않고, 카카오톡 DataStore(`files/datastore/Feature_DataStore.pref.preferences_pb`)의 `userDbPassPhraseSalt` 값으로 PBKDF2를 돌려 만들어요. 루트 도우미가 이 값을 읽고 DB를 읽기 전용으로 그 자리에서 열어요.
+- 암호는 저장돼 있지 않고, 카카오톡 DataStore의 `userDbPassPhraseSalt` 값으로 PBKDF2를 돌려 만들어요. 이 값은 카카오톡 26.10부터 `files/datastore/<계정 폴더>/Features.preferences_pb`에, 그 전에는 `files/datastore/Feature_DataStore.pref.preferences_pb`에 있어요(둘 다 없으면 그 계정의 다른 DataStore 파일에서도 찾아요). 루트 도우미(공유 UID 모드에서는 공유 UID 도우미)가 이 값을 읽고 DB를 읽기 전용으로 그 자리에서 열어요.
 - 친구 이름은 `nickname` 컬럼에서 읽고, `user`에 없는 카카오 채널은 `talk_channel`에서 이름을 찾아요. `user`의 나머지 컬럼 구성은 확실하지 않아서, 연결할 때 실제 컬럼 목록을 로그에 남겨요.
 - 루트 모드와 공유 UID 모드에서 읽을 수 있어요. 직접 모드에서는 친구가 "알 수 없는 사용자"로 보이고, 연결 상태에 경고가 떠요.
 - 열거나 읽다 실패해도 메시지 이벤트는 계속 전달돼요(친구 이름만 비어요). 연결 상태에 원인이 표시되고, 5분마다 다시 시도해요.

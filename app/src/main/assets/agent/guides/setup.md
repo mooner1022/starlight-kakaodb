@@ -16,7 +16,10 @@ plugin a way in: the **접근 방식** (access mode). Scripts can't change it; t
 | Shared UID | **공유 UID** | KakaoTalk and the plugin's helper app, patched to share a user ID and installed in the plugin's initial setup. No root. Updating the helper and the signing key are in the plugin settings, under **공유 UID 도우미** (shared UID helper). |
 
 - **데이터베이스 폴더** (database folder) is `/data/data/com.kakao.talk/databases` unless KakaoTalk's data is
-  somewhere else, such as a second user or a cloned app.
+  somewhere else, such as a second user or a cloned app. KakaoTalk 26.10 and later keep the database in an account
+  folder inside it (`databases/<16 hex digits>`), which the plugin finds by itself on every connection: leave the
+  setting at `databases`. With several account folders it reads the most recently used one; to read another, set the
+  folder to it.
 - In direct mode, newer KakaoTalk versions keep the friend list in `crypto_user_database`, which only root and shared
   UID modes read. Friends then come as users of kind `unknown`, and `KakaoDB.getFriends()` is empty; messages still
   arrive.

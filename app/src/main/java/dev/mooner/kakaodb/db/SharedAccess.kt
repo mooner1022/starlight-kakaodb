@@ -13,7 +13,6 @@ import android.system.Os
 import android.system.OsConstants
 import android.system.StructPollfd
 import dev.mooner.kakaodb.BuildConfig
-import dev.mooner.kakaodb.core.DecoderOptions
 import dev.mooner.kakaodb.rootd.Protocol
 import dev.mooner.kakaodb.utils.tr
 import kotlinx.coroutines.channels.awaitClose
@@ -37,6 +36,8 @@ import kotlin.concurrent.thread
  *
  * Unlike the root helper, which the plugin starts from its own asset, this one is installed by hand and can be left
  * behind by a plugin update: it reports its build, and [prepare] warns when it isn't [BuildConfig.SHARED_HELPER_BUILD].
+ * Such a helper still serves KakaoTalk versions before 26.10; with 26.10's account folders, [prepare] fails telling the
+ * user to update it.
  */
 internal class SharedAccess : DatabaseAccess {
 
@@ -44,48 +45,41 @@ internal class SharedAccess : DatabaseAccess {
 
     override val sessionFactory = RootSqliteSession.factory { connect(RootHelper.SESSION_TIMEOUT_MILLIS).channel }
 
-    override fun prepare(dir: File): AccessResult {
-        val warnings = ArrayList<String>()
+    override fun prepare(dir: File): AccessResult =
         try {
             connect(RootHelper.SESSION_TIMEOUT_MILLIS).use { helper ->
-                if (helper.build != BuildConfig.SHARED_HELPER_BUILD)
-                    warnings += tr(
+                val outdated = helper.build != BuildConfig.SHARED_HELPER_BUILD
+                val result = try {
+                    helper.channel.prepareDatabases(dir) { file ->
+                        tr(
+                            "${file.path} doesn't exist. Open KakaoTalk and sign in, then connect again.",
+                            "${file.path} 파일이 없어요. 카카오톡을 실행해 로그인한 뒤 다시 연결하세요.",
+                        )
+                    }
+                } catch (e: IOException) {
+                    // A helper from before KakaoTalk 26.10's account folders ends the connection on the op that finds
+                    // them, and refuses to open them: only updating it helps.
+                    if (outdated && (e !is HelperError || NOT_PERMITTED in e.message.orEmpty()))
+                        throw IOException(helperOutdated(tr(
+                            "build ${helper.build}, which may not know KakaoTalk 26.10's account folders",
+                            "빌드 ${helper.build}, 카카오톡 26.10의 계정 폴더를 모를 수 있어요",
+                        )), e)
+                    throw e
+                }
+                if (outdated && result is AccessResult.Ready)
+                    result.copy(warnings = result.warnings + tr(
                         "The installed shared UID helper is build ${helper.build}, this plugin's is ${BuildConfig.SHARED_HELPER_BUILD}. Use \"Patch helper only\" in the plugin settings, then \"Install patched helper\".",
                         "설치된 공유 UID 도우미의 빌드(${helper.build})가 이 플러그인의 빌드(${BuildConfig.SHARED_HELPER_BUILD})와 달라요. 플러그인 설정에서 \"도우미만 다시 패치\"한 뒤 \"패치된 도우미 설치\"로 설치하세요.",
-                    )
-                val channel = helper.channel
-                val names = listOf(DecoderOptions.MAIN_DB, DecoderOptions.SUB_DB)
-                channel.send(Protocol.OP_CHECK) {
-                    writeString(dir.path)
-                    writeNames(names)
-                }
-                channel.expectOk()
-                if (!channel.input.readBoolean())
-                    return AccessResult.Failed(tr("${dir.path} doesn't exist", "${dir.path} 폴더가 없어요"))
-                for (name in names) {
-                    val mask = channel.input.readUnsignedByte()
-                    if (mask and Protocol.FILE_EXISTS == 0)
-                        return AccessResult.Failed(tr(
-                            "${File(dir, name).path} doesn't exist. Open KakaoTalk and sign in, then connect again.",
-                            "${File(dir, name).path} 파일이 없어요. 카카오톡을 실행해 로그인한 뒤 다시 연결하세요.",
-                        ))
-                    if (mask and Protocol.FILE_UNSAFE != 0) {
-                        val missing = listOfNotNull(
-                            "-wal".takeIf { mask and Protocol.FILE_WAL == 0 },
-                            "-shm".takeIf { mask and Protocol.FILE_SHM == 0 },
-                        ).joinToString(", ")
-                        return AccessResult.Failed(walFilesMissing(name, missing))
-                    }
-                }
+                    ))
+                else
+                    result
             }
         } catch (e: Exception) {
-            return AccessResult.Failed(tr(
+            AccessResult.Failed(tr(
                 "Couldn't use the shared UID helper: ${e.message ?: e}",
                 "공유 UID 도우미를 사용할 수 없어요: ${e.message ?: e}",
             ))
         }
-        return AccessResult.Ready(warnings)
-    }
 
     override fun fileChanges(dir: File): Flow<Unit> = callbackFlow {
         val closed = AtomicBoolean(false)
@@ -247,6 +241,9 @@ internal class SharedAccess : DatabaseAccess {
     private companion object {
         const val WATCH_RETRY_MILLIS = 5_000L
         const val BIND_TIMEOUT_SECONDS = 10L
+
+        /** How a helper from before account folders refuses one (RootDaemon's checkedDir). */
+        const val NOT_PERMITTED = "Database directory is not permitted"
     }
 }
 
